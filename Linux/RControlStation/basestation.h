@@ -37,6 +37,13 @@ public:
     ~BaseStation();
     int getAvgPosLlh(double &lat, double &lon, double &height);
 
+#ifdef HAS_SBS
+    bool initialize();
+    bool isValid();
+    double getSamples();
+//    double getPos(int i);
+#endif
+
 signals:
     void rtcmOut(QByteArray data);
 
@@ -56,6 +63,10 @@ private slots:
     void on_ubxSerialConnectButton_clicked();
     void on_refGetButton_clicked();
     void on_tcpServerBox_toggled(bool checked);
+
+#ifdef HAS_SBS
+    void configTimerSlot();
+#endif
 
 private:
     Ui::BaseStation *ui;
@@ -78,6 +89,26 @@ private:
     QString mSatNowStr;
 
     void updateNmeaText();
+
+#ifdef HAS_SBS
+    QTimer *configTimer;
+    bool proceed;
+    bool valid; // hack
+
+    double lastOkPosX;
+    double lastOkPosY;
+    double lastOkPosZ;
+
+    double xMaxNow;
+    double yMaxNow;
+    double zMaxNow;
+
+    double xMaxAvg;
+    double yMaxAvg;
+    double zMaxAvg;
+#endif
+
 };
 
 #endif // BASESTATION_H
+

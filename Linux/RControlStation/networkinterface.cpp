@@ -19,6 +19,11 @@
 #include "ui_networkinterface.h"
 #include <QMessageBox>
 
+#ifdef HAS_SBS
+#include "nmeawidget.h"
+#include "basestation.h"
+#endif
+
 NetworkInterface::NetworkInterface(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::NetworkInterface)
@@ -154,6 +159,95 @@ void NetworkInterface::sendError(const QString &txt, const QString &cmd)
 
     qWarning() << "NetworkIf:" << cmd << ":" << txt;
 }
+
+#ifdef HAS_SBS
+void NetworkInterface::sendOk(quint8 id)
+{
+    QByteArray data;
+    QXmlStreamWriter stream(&data);
+    stream.setAutoFormatting(true);
+
+    stream.writeStartDocument();
+    stream.writeStartElement("message");
+    stream.writeStartElement("getRControlStation");
+
+    stream.writeTextElement("id", QString::number(id));
+    stream.writeTextElement("ok", QString::number(1));
+
+    stream.writeEndDocument();
+    sendData(data);
+}
+
+void NetworkInterface::sendInitializeCar(quint8 id, bool hasCar, bool hasBase)
+{
+    QByteArray data;
+    QXmlStreamWriter stream(&data);
+    stream.setAutoFormatting(true);
+
+    stream.writeStartDocument();
+    stream.writeStartElement("message");
+    stream.writeStartElement("initializeCar");
+
+    stream.writeTextElement("id", QString::number(id));
+    stream.writeTextElement("carOk", QString::number(pMainWindow->initializeCar(id, hasCar, hasBase)));
+
+    stream.writeEndDocument();
+    sendData(data);
+}
+
+void NetworkInterface::sendBaseStation(quint8 id)
+{
+    bool ok = pBase->isValid();
+
+    QByteArray data;
+    QXmlStreamWriter stream(&data);
+    stream.setAutoFormatting(true);
+
+    stream.writeStartDocument();
+    stream.writeStartElement("message");
+    stream.writeStartElement("getBaseStation");
+
+    stream.writeTextElement("id", QString::number(id));
+    stream.writeTextElement("baseOk", QString::number(ok));
+    stream.writeTextElement("samples", QString::number(pBase->getSamples()));
+
+//    if (ok) {
+//        stream.writeTextElement("lat", QString::number(pBaseUi->getPos(0)));
+//        stream.writeTextElement("lon", QString::number(pBaseUi->getPos(1)));
+//        stream.writeTextElement("height", QString::number(pBaseUi->getPos(2)));
+//    } else {
+//        stream.writeTextElement("lat", QString::number(0));
+//        stream.writeTextElement("lon", QString::number(0));
+//        stream.writeTextElement("height", QString::number(0));
+//    }
+
+    stream.writeEndDocument();
+    sendData(data);
+}
+
+void NetworkInterface::sendSolution(quint8 id)
+{
+    QByteArray data;
+    QXmlStreamWriter stream(&data);
+    stream.setAutoFormatting(true);
+
+    stream.writeStartDocument();
+    stream.writeStartElement("message");
+    stream.writeStartElement("getSolution");
+
+    stream.writeTextElement("id", QString::number(id));
+
+    for (int i=0; i<pNmea.size(); ++i) {
+        if (pNmea[i]->getId() == id) {
+            stream.writeTextElement("solution", pNmea[i]->getSolution());
+            break;
+        }
+    }
+
+    stream.writeEndDocument();
+    sendData(data);
+}
+#endif
 
 void NetworkInterface::tcpDataRx(const QByteArray &data)
 {
@@ -316,49 +410,17 @@ void NetworkInterface::processXml(const QByteArray &xml)
             if (!ui->disableSendCarBox->isChecked() && mPacketInterface) {
                 mPacketInterface->getState(id);
             }
-        } else if (name == "addRoutePoint" || name == "replaceRoute") {
+
+#ifdef HAS_SBS
+        } else if (name == "getRControlStation") {
             quint8 id = 0;
             bool ok = true;
-
-            QList<LocPoint> route;
-            LocPoint p;
-            route.append(p);
 
             while (stream.readNextStartElement()) {
                 QString name2 = stream.name().toString();
 
                 if (name2 == "id") {
                     id = stream.readElementText().toInt();
-                } else if (name2 == "px") {
-                    p.setX(stream.readElementText().toDouble());
-                } else if (name2 == "py") {
-                    p.setY(stream.readElementText().toDouble());
-                } else if (name2 == "speed") {
-                    p.setSpeed(stream.readElementText().toDouble());
-                } else if (name2 == "time") {
-                    p.setTime(stream.readElementText().toInt());
-                } else if (name2 == "point") {
-                    while (stream.readNextStartElement()) {
-                        QString name3 = stream.name().toString();
-
-                        if (name3 == "px") {
-                            p.setX(stream.readElementText().toDouble());
-                        } else if (name3 == "py") {
-                            p.setY(stream.readElementText().toDouble());
-                        } else if (name3 == "speed") {
-                            p.setSpeed(stream.readElementText().toDouble());
-                        } else if (name3 == "time") {
-                            p.setTime(stream.readElementText().toInt());
-                        } else {
-                            QString str;
-                            str += "argument not found: " + name3;
-                            sendError(str, name);
-                            stream.skipCurrentElement();
-                            ok = false;
-                        }
-                    }
-
-                    route.append(p);
                 } else {
                     QString str;
                     str += "argument not found: " + name2;
@@ -371,38 +433,229 @@ void NetworkInterface::processXml(const QByteArray &xml)
             if (stream.hasError()) {
                 break;
             }
-
             if (!ok) {
                 continue;
             }
 
-            if (route.isEmpty()) {
-                route.append(p);
-            }
+            sendOk(id);
 
-            if (!ui->disableSendCarBox->isChecked() && mPacketInterface) {
-                if (name == "addRoutePoint") {
-                    if (!mPacketInterface->setRoutePoints(id, route)) {
-                        sendError("No ACK received from car. Make sure that the car connection "
-                                  "works.", name);
-                    }
+        } else if (name == "initializeCar") {
+            quint8 id = 0;
+            bool hasCar = 0;
+            bool hasBase = 0;
+            bool ok = true;
+
+            while (stream.readNextStartElement()) {
+                QString name2 = stream.name().toString();
+
+                if (name2 == "id") {
+                    id = stream.readElementText().toInt();
+                } else if (name2 == "hasCar") {
+                    hasCar = stream.readElementText().toInt();
+                } else if (name2 == "hasBase") {
+                    hasBase = stream.readElementText().toInt();
                 } else {
-                    if (!mPacketInterface->replaceRoute(id, route)) {
-                        sendError("No ACK received from car. Make sure that the car connection "
-                                  "works.", name);
+                    QString str;
+                    str += "argument not found: " + name2;
+                    sendError(str, name);
+                    stream.skipCurrentElement();
+                    ok = false;
+                }
+            }
+
+            if (stream.hasError()) {
+                break;
+            }
+            if (!ok) {
+                continue;
+            }
+
+            sendInitializeCar(id, hasCar, hasBase);
+
+        } else if (name == "getBaseStation") {
+            quint8 id = 0;
+            bool ok = true;
+
+            while (stream.readNextStartElement()) {
+                QString name2 = stream.name().toString();
+
+                if (name2 == "id") {
+                    id = stream.readElementText().toInt();
+                } else {
+                    QString str;
+                    str += "argument not found: " + name2;
+                    sendError(str, name);
+                    stream.skipCurrentElement();
+                    ok = false;
+                }
+            }
+
+            if (stream.hasError()) {
+                break;
+            }
+            if (!ok) {
+                continue;
+            }
+
+            sendBaseStation(id);
+
+        } else if (name == "getSolution") {
+            quint8 id = 0;
+            bool ok = true;
+
+            while (stream.readNextStartElement()) {
+                QString name2 = stream.name().toString();
+
+                if (name2 == "id") {
+                    id = stream.readElementText().toInt();
+                } else {
+                    QString str;
+                    str += "argument not found: " + name2;
+                    sendError(str, name);
+                    stream.skipCurrentElement();
+                    ok = false;
+                }
+            }
+
+            if (stream.hasError()) {
+                break;
+            }
+            if (!ok) {
+                continue;
+            }
+
+            sendSolution(id);
+
+
+        } else if (name == "setRPiClock") {
+            quint8 id = 0;
+            bool ok = true;
+
+            while (stream.readNextStartElement()) {
+                QString name2 = stream.name().toString();
+
+                if (name2 == "id") {
+                    id = stream.readElementText().toInt();
+                } else {
+                    QString str;
+                    str += "argument not found: " + name2;
+                    sendError(str, name);
+                    stream.skipCurrentElement();
+                    ok = false;
+                }
+            }
+
+            if (stream.hasError()) {
+                break;
+            }
+            if (!ok) {
+                continue;
+            }
+
+            pMainWindow->setRPiClock(id);
+#endif
+
+
+
+
+
+
+
+
+
+
+        } else if (name == "addRoutePoint" || name == "replaceRoute") {
+                    quint8 id = 0;
+                    bool ok = true;
+
+                    QList<LocPoint> route;
+                    LocPoint p;
+//                    route.append(p);
+
+                    while (stream.readNextStartElement()) {
+                        QString name2 = stream.name().toString();
+
+                        if (name2 == "id") {
+                            id = stream.readElementText().toInt();
+                        } else if (name2 == "px") {
+                            p.setX(stream.readElementText().toDouble());
+                        } else if (name2 == "py") {
+                            p.setY(stream.readElementText().toDouble());
+                        } else if (name2 == "speed") {
+                            p.setSpeed(stream.readElementText().toDouble());
+                        } else if (name2 == "time") {
+                            p.setTime(stream.readElementText().toInt());
+                        } else if (name2 == "point") {
+                            while (stream.readNextStartElement()) {
+                                QString name3 = stream.name().toString();
+
+                                if (name3 == "px") {
+                                    p.setX(stream.readElementText().toDouble());
+                                } else if (name3 == "py") {
+                                    p.setY(stream.readElementText().toDouble());
+                                } else if (name3 == "speed") {
+                                    p.setSpeed(stream.readElementText().toDouble());
+                                } else if (name3 == "time") {
+                                    p.setTime(stream.readElementText().toInt());
+                                } else {
+                                    QString str;
+                                    str += "argument not found: " + name3;
+                                    sendError(str, name);
+                                    stream.skipCurrentElement();
+                                    ok = false;
+                                }
+                            }
+
+                            route.append(p);
+                        } else {
+                            QString str;
+                            str += "argument not found: " + name2;
+                            sendError(str, name);
+                            stream.skipCurrentElement();
+                            ok = false;
+                        }
                     }
-                }
-            }
 
-            if (mMap && ui->plotRouteMapBox->isChecked()) {
-                if (name == "replaceRoute") {
-                    mMap->clearRoute();
-                }
+                    if (stream.hasError()) {
+                        break;
+                    }
 
-                for (LocPoint p: route) {
-                    mMap->addRoutePoint(p.getX(), p.getY(), p.getSpeed(), p.getTime());
-                }
-            }
+                    if (!ok) {
+                        continue;
+                    }
+
+                    // Has no function
+                    if (route.isEmpty()) {
+                        route.append(p);
+                    }
+
+                    if (!ui->disableSendCarBox->isChecked() && mPacketInterface) {
+                        if (name == "addRoutePoint") {
+                            if (!mPacketInterface->setRoutePoints(id, route)) {
+                                sendError("No ACK received from car. Make sure that the car connection "
+                                          "works.", name);
+                            }
+                        } else {
+                            if (!mPacketInterface->replaceRoute(id, route)) {
+                                sendError("No ACK received from car. Make sure that the car connection "
+                                          "works.", name);
+                            }
+                        }
+                    }
+
+                    if (mMap && ui->plotRouteMapBox->isChecked()) {
+#ifdef HAS_SBS
+                        mMap->setRouteNow(id);
+#endif
+                        if (name == "replaceRoute") {
+                            mMap->clearRoute();
+                        }
+
+                        for (LocPoint p: route) {
+                            mMap->addRoutePoint(p.getX(), p.getY(), p.getSpeed(), p.getTime());
+                        }
+                    }
+
         } else if (name == "removeLastPoint") {
             quint8 id = 0;
             bool ok = true;
@@ -435,6 +688,13 @@ void NetworkInterface::processXml(const QByteArray &xml)
                               "works.", name);
                 }
             }
+
+#ifdef HAS_SBS // Might work without, since clear route doesn't have this
+            if (mMap && ui->plotRouteMapBox->isChecked()) {
+                mMap->removeLastPoint();
+            }
+#endif
+
         } else if (name == "clearRoute") {
             quint8 id = 0;
             bool ok = true;
@@ -467,6 +727,13 @@ void NetworkInterface::processXml(const QByteArray &xml)
                               "works.", name);
                 }
             }
+
+#ifdef HAS_SBS
+            if (mMap && ui->plotRouteMapBox->isChecked()) {
+                mMap->setRouteNow(id);
+                mMap->clearRoute();
+            }
+#endif
         } else if (name == "setAutopilotActive") {
             quint8 id = 0;
             bool enabled = false;
@@ -500,6 +767,10 @@ void NetworkInterface::processXml(const QByteArray &xml)
                 if (!mPacketInterface->setApActive(id, enabled)) {
                     sendError("No ACK received from car. Make sure that the car connection "
                               "works.", name);
+#ifdef HAS_SBS
+                } else {
+                    pMainWindow->setUpdateRouteFromMap(id, enabled);
+#endif
                 }
             }
         } else if (name == "getEnuRef") {
@@ -712,3 +983,32 @@ void NetworkInterface::sendData(const QByteArray &data)
         }
     }
 }
+
+#ifdef HAS_SBS
+void NetworkInterface::connectUDP()
+{
+    ui->udpActivateBox->setChecked(true);
+}
+
+void NetworkInterface::setBaseStation(BaseStation *baseStation)
+{
+    pBase = baseStation;
+}
+
+void NetworkInterface::setNmeaWidget(NmeaWidget *nmeaWidget)
+{
+    pNmea.append(nmeaWidget);
+}
+
+void NetworkInterface::setMainWindow(MainWindow *mainWindow)
+{
+    pMainWindow = mainWindow;
+}
+#endif
+
+
+
+
+
+
+

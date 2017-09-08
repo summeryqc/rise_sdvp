@@ -17,6 +17,7 @@
 
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "utility.h"
 #include <QSerialPortInfo>
 #include <QDebug>
 #include <cmath>
@@ -24,10 +25,12 @@
 #include <QFileDialog>
 #include <QHostInfo>
 #include <QInputDialog>
-#include <QXmlStreamWriter>
-#include <QXmlStreamReader>
 
-#include "utility.h"
+#ifdef HAS_SBS
+#include "networkinterface.h"
+#include "nmeawidget.h"
+#include "basestation.h"
+#endif
 
 namespace {
 void stepTowards(double &value, double goal, double step) {
@@ -46,6 +49,7 @@ void stepTowards(double &value, double goal, double step) {
     }
 }
 
+#ifdef HAS_JOYSTICK
 void deadband(double &value, double tres, double max) {
     if (fabs(value) < tres) {
         value = 0.0;
@@ -59,6 +63,7 @@ void deadband(double &value, double tres, double max) {
 
     }
 }
+#endif
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -67,7 +72,7 @@ MainWindow::MainWindow(QWidget *parent) :
 {
     ui->setupUi(this);
 
-    mVersion = "0.6";
+    mVersion = "0.5";
 
     qRegisterMetaType<LocPoint>("LocPoint");
 
@@ -89,7 +94,6 @@ MainWindow::MainWindow(QWidget *parent) :
     mPing = new Ping(this);
     mNmea = new NmeaServer(this);
     mUdpSocket = new QUdpSocket(this);
-    mTcpSocket = new QTcpSocket(this);
 
     mKeyUp = false;
     mKeyDown = false;
@@ -101,7 +105,6 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->networkInterface->setMap(ui->mapWidget);
     ui->networkInterface->setPacketInterface(mPacketInterface);
     ui->moteWidget->setPacketInterface(mPacketInterface);
-    ui->rtRangeWidget->setMap(ui->mapWidget);
 
     connect(mTimer, SIGNAL(timeout()), this, SLOT(timerSlot()));
     connect(mSerialPort, SIGNAL(readyRead()),
@@ -134,12 +137,6 @@ MainWindow::MainWindow(QWidget *parent) :
             this, SLOT(routePointAdded(LocPoint)));
     connect(ui->mapWidget, SIGNAL(infoTraceChanged(int)),
             this, SLOT(infoTraceChanged(int)));
-    connect(mTcpSocket, SIGNAL(readyRead()), this, SLOT(tcpInputDataAvailable()));
-    connect(mTcpSocket, SIGNAL(connected()), this, SLOT(tcpInputConnected()));
-    connect(mTcpSocket, SIGNAL(disconnected()),
-            this, SLOT(tcpInputDisconnected()));
-    connect(mTcpSocket, SIGNAL(error(QAbstractSocket::SocketError)),
-            this, SLOT(tcpInputError(QAbstractSocket::SocketError)));
 
     connect(ui->actionAboutQt, SIGNAL(triggered(bool)),
             qApp, SLOT(aboutQt()));
@@ -147,6 +144,39 @@ MainWindow::MainWindow(QWidget *parent) :
     on_serialRefreshButton_clicked();
 
     qApp->installEventFilter(this);
+
+#ifdef HAS_SBS
+    setWindowTitle("RControlStation-SBS");
+    setWindowIcon(QIcon(":/Icons/Car-96_white.png"));
+
+    // Add button for xbox controller
+    xbox = new QCheckBox(ui->groupBox_3);
+    xbox->setObjectName("xboxButton");
+    xbox->setFixedWidth(150);
+    xbox->setText("Xbox controller");
+    ui->gridLayout_3->addWidget(xbox, 0, 0, Qt::AlignTop);
+    connect(xbox, SIGNAL(toggled(bool)),
+            this, SLOT(xboxButtonToggled(bool)));
+
+    mXbox = false;
+    mBrakeValue = 0.0;
+    mSpeed = 0.0;
+    mLimit = 0.0;
+
+    mL1 = 0.0;
+    mR1 = 0.0;
+    mL2 = 0.0;
+    mR2 = 0.0;
+    mAxisLeftX = 0.0;
+    mAxisLeftY = 0.0;
+    mA = false;
+    mY = false;
+
+    // Connect UDP and expose mainwidow to networkinterface
+    ui->networkInterface->setMainWindow(this);
+    ui->networkInterface->connectUDP();
+
+#endif
 }
 
 MainWindow::~MainWindow()
@@ -282,7 +312,7 @@ void MainWindow::timerSlot()
             utility::truncate_number_abs(&js_mr_roll, 1.0);
             utility::truncate_number_abs(&js_mr_pitch, 1.0);
             utility::truncate_number_abs(&js_mr_yaw, 1.0);
-        } else if (mJsType == JS_TYPE_PS4 || mJsType == JS_TYPE_PS3) {
+        } else if (mJsType == JS_TYPE_PS4) {
             mThrottle = -(double)mJoystick->getAxis(1) / 32768.0;
             deadband(mThrottle,0.1, 1.0);
             mSteering = (double)mJoystick->getAxis(2) / 32768.0;
@@ -290,6 +320,188 @@ void MainWindow::timerSlot()
 
         //mSteering /= 2.0;
 #endif
+
+#ifdef HAS_SBS
+    } else if (mXbox && mCars.size() > 0){
+
+        CarInterface *mSelectedCar = mCars[ui->mapCarBox->value()];
+
+        // mSpeed is between 1 and 0, procentage of the currently set max speed
+         mSpeed = ((mSelectedCar->getSpeed()) / (21 * ui->throttleMaxBox->value() + 0.1));
+
+        // for testing:
+//        mSpeed = ((mThrottle * ui->throttleMaxBox->value() * 21) / (21 * ui->throttleMaxBox->value() + 0.1));
+
+
+
+
+        // Button R2 -> Throttle
+        if (!mA && mL2 == 0.0) {
+            mBrakeValue = 0.0;
+            mThrottle = mR2;
+        }
+
+        // Button L2 -> Brake + -Throttle
+//        if (!mA && mL2 > 0.0) {
+//            if (mSelectedCar->getSpeed() > 0.1) {
+//                mThrottle = 0.0;
+//                stepTowards(mBrakeValue,
+//                            25.0 * (0.1 + (0.9 * mL2)),
+//                            0.3306 * ((1 - mSpeed) + 0.1) * (0.1 + (0.9 * mL2)));
+//                mPacketInterface->setRcControlCurrentBrake(255, mBrakeValue, 0.0);
+//                // stepTowards(brakeValue, 20.0, 0.4);
+//            } else {
+//                mBrakeValue = 0.0;
+//                mThrottle = -1 * mL2;
+//            }
+//        }
+
+        if (!mA && mL2 > 0.0) {
+            if (mSelectedCar->getSpeed() > 0.1) {
+                mThrottle = 0.0;
+                stepTowards(mBrakeValue, 25, 0.2 * mL2);
+                mPacketInterface->setRcControlCurrentBrake(255, mBrakeValue, 0.0);
+            } else {
+                mBrakeValue = 0.0;
+                mThrottle = -1 * mL2;
+            }
+        }
+
+        // Button AxisLeftX -> Steering
+        // Adjuting the value cuz the stick is very sensitive around 0
+        if (mAxisLeftX < 0.0) {
+            mSteering = (mAxisLeftX + 0.20) * 1.251;
+        } else if (mAxisLeftX > 0.0) {
+            mSteering = (mAxisLeftX - 0.20) * 1.25;
+        } else {
+            mSteering = 0.0;
+        }
+
+//        if (mAxisLeftY > 0.15) {
+//            mSteering = mAxisLeftX;
+//        } else {
+//            if (mAxisLeftX < 0.0) {
+//                mSteering = (mAxisLeftX + 0.20) * 1.1;
+//            } else if (mAxisLeftX > 0.0) {
+//                mSteering = (mAxisLeftX - 0.20) * 1.1;
+//            } else {
+//                mSteering = 0.0;
+//            }
+//        }
+
+
+//        if (mAxisLeftX < 0.0) {
+//            if (mAxisLeftY < 0.5) {
+//                mSteering = mAxisLeftX + (0.2 * (0.5 - mAxisLeftY)) ;
+//            } else {
+//                mSteering = mAxisLeftX +  0.2;
+//            }
+//        } else if (mAxisLeftX > 0.0) {
+//            if (mAxisLeftY < 0.5) {
+//                mSteering = mAxisLeftX + (-0.2 * (0.5 - mAxisLeftY)) ;
+//            } else {
+//                mSteering = mAxisLeftX - 0.2;
+//            }
+//        } else {
+//            mSteering = 0.0;
+//        }
+
+
+
+        // Button A -> Handbrake
+        if (mA) {
+            mThrottle = 0.0;
+            mLimit = mSpeed;
+            stepTowards(mBrakeValue, 20.0, 0.3306 * ((1 - mSpeed) + 0.1)); //not tested
+//            stepTowards(brakeValue, 20.0, 0.4);
+            mPacketInterface->setRcControlCurrentBrake(255, mBrakeValue, 0.0);
+        }
+
+        // Button Y -> Emergency Stop
+        if (mY) {
+            mThrottle = 0.0;
+            mSteering = 0.0;
+            mBrakeValue = 0.0;
+            mLimit = 0.0;
+            for (int i = 0;i < mCars.size();i++) {
+                mCars[i]->emergencyStop();
+            }
+            mXbox = false;
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+            mPacketInterface->setRcControlCurrentBrake(255, 20.0, 0.0);
+        }
+
+        // Button L1 -> Select Previous Car
+        if (mL1 && ui->carsWidget->count() > 1) {
+            if (ui->carsWidget->currentIndex() == 0) {
+                ui->carsWidget->setCurrentIndex(ui->carsWidget->count() - 1);
+            } else {
+                ui->carsWidget->setCurrentIndex(ui->carsWidget->currentIndex() - 1);
+            }
+            ui->mapCarBox->setValue(mCars[ui->carsWidget->currentIndex()]->getId());
+            ui->mapWidget->setSelectedCar(mCars[ui->carsWidget->currentIndex()]->getId());
+        }
+
+        // Button R1 -> Select Next Car
+        if (mR1 && ui->carsWidget->count() > 1) {
+            if (ui->carsWidget->currentIndex() == ui->carsWidget->count() - 1) {
+                ui->carsWidget->setCurrentIndex(0);
+            } else {
+                ui->carsWidget->setCurrentIndex(ui->carsWidget->currentIndex() + 1);
+            }
+            ui->mapCarBox->setValue(mCars[ui->carsWidget->currentIndex()]->getId());
+            ui->mapWidget->setSelectedCar(mCars[ui->carsWidget->currentIndex()]->getId());
+        }
+
+        // Limit Acceleration
+        if (!mA && mL2 == 0.0 && mSpeed >= 0.0) {
+            stepTowards(mLimit, mThrottle, ((mSpeed + 0.01) * (0.02 / (ui->throttleMaxBox->value() + 0.01)))
+                        - ((0.013 / (ui->throttleMaxBox->value() + 0.01)) * (mSpeed * mSpeed * mSpeed)));
+            if (mLimit < 0.0) {
+                mLimit = 0.0;
+            }
+
+            if (mLimit < mThrottle && mR2 > 0.0) {
+                mThrottle = mLimit;
+            }
+
+            if (mLimit > mThrottle) {
+                mLimit = mSpeed;
+            }
+        }
+
+        // Limit -Acceleration, -Throttle
+        if (!mA && mL2 > 0.0 && mSpeed <= 0.0) {
+            stepTowards(mLimit, 0.4 * mThrottle, (((-1 * mSpeed) + 0.01) * (0.02 / (ui->throttleMaxBox->value() + 0.01))));
+            if (mLimit > 0.0) {
+                mLimit = 0.0;
+            }
+
+            if (mLimit > mThrottle) {
+                mThrottle = mLimit;
+            } else {
+                mLimit = mSpeed;
+            }
+        }
+
+        // Set toggable
+        if (mL1) {
+            mL1 = false;
+        }
+
+        if (mR1) {
+            mR1 = false;
+        }
+#endif
+
     } else {
         if (mKeyUp) {
             stepTowards(mThrottle, 1.0, ui->throttleGainBox->value());
@@ -308,13 +520,20 @@ void MainWindow::timerSlot()
         }
     }
 
+    // Prevent car from keep going when focus is lost
+    if (!qApp->focusWidget()) {
+        mThrottle = 0;
+        mKeyUp = 0;
+        mKeyDown = 0;
+    }
+
     ui->mrThrottleBar->setValue(js_mr_thr * 100.0);
     ui->mrRollBar->setValue(js_mr_roll * 100.0);
     ui->mrPitchBar->setValue(js_mr_pitch * 100.0);
     ui->mrYawBar->setValue(js_mr_yaw * 100.0);
 
     ui->throttleBar->setValue(mThrottle * 100.0);
-    ui->steeringBar->setValue(mSteering * 100.0);
+    ui->steeringBar->setValue(mSteering * 100.0);        
 
     // Notify about key events
     for(QList<CarInterface*>::Iterator it_car = mCars.begin();it_car < mCars.end();it_car++) {
@@ -335,7 +554,7 @@ void MainWindow::timerSlot()
             mStatusLabel->setStyleSheet(qApp->styleSheet());
         }
     } else {
-        if (mSerialPort->isOpen() || mPacketInterface->isUdpConnected() || mTcpSocket->isOpen()) {
+        if (mSerialPort->isOpen() || mPacketInterface->isUdpConnected()) {
             mStatusLabel->setText("Connected");
         } else {
             mStatusLabel->setText("Not connected");
@@ -439,10 +658,6 @@ void MainWindow::packetDataToSend(QByteArray &data)
     if (mSerialPort->isOpen()) {
         mSerialPort->write(data);
     }
-
-    if (mTcpSocket->isOpen()) {
-        mTcpSocket->write(data);
-    }
 }
 
 void MainWindow::stateReceived(quint8 id, CAR_STATE state)
@@ -482,18 +697,6 @@ void MainWindow::ackReceived(quint8 id, CMD_PACKET cmd, QString msg)
 void MainWindow::rtcmReceived(QByteArray data)
 {
     mPacketInterface->sendRtcmUsb(255, data);
-
-    if (ui->mapEnuBaseBox->isChecked()) {
-        rtcm3_init_state(&mRtcmState);
-        mRtcmState.decode_all = true;
-
-        for(char b: data) {
-            int res = rtcm3_input_data(b, &mRtcmState);
-            if (res == 1005 || res == 1006) {
-                ui->mapWidget->setEnuRef(mRtcmState.pos.lat, mRtcmState.pos.lon, mRtcmState.pos.height);
-            }
-        }
-    }
 }
 
 void MainWindow::rtcmRefPosGet()
@@ -647,35 +850,6 @@ void MainWindow::infoTraceChanged(int traceNow)
     ui->mapInfoTraceBox->setValue(traceNow);
 }
 
-void MainWindow::tcpInputConnected()
-{
-    showStatusInfo(tr("TCP Connected"), true);
-}
-
-void MainWindow::tcpInputDisconnected()
-{
-    showStatusInfo(tr("TCP Disconnected"), false);
-}
-
-void MainWindow::tcpInputDataAvailable()
-{
-    while (mTcpSocket->bytesAvailable() > 0) {
-        QByteArray data = mTcpSocket->readAll();
-        mPacketInterface->processData(data);
-    }
-}
-
-void MainWindow::tcpInputError(QAbstractSocket::SocketError socketError)
-{
-    (void)socketError;
-
-    QString errorStr = mTcpSocket->errorString();
-    qWarning() << "TCP Error:" << errorStr;
-    QMessageBox::warning(this, "TCP Error", errorStr);
-
-    mTcpSocket->close();
-}
-
 void MainWindow::on_carAddButton_clicked()
 {
     CarInterface *car = new CarInterface(this);
@@ -726,10 +900,6 @@ void MainWindow::on_serialConnectButton_clicked()
     mSerialPort->setFlowControl(QSerialPort::NoFlowControl);
 
     mPacketInterface->stopUdpConnection();
-
-    if (mTcpSocket->isOpen()) {
-        mTcpSocket->close();
-    }
 }
 
 void MainWindow::on_serialRefreshButton_clicked()
@@ -766,10 +936,6 @@ void MainWindow::on_disconnectButton_clicked()
     if (mPacketInterface->isUdpConnected()) {
         mPacketInterface->stopUdpConnection();
     }
-
-    if (mTcpSocket->isOpen()) {
-        mTcpSocket->close();
-    }
 }
 
 void MainWindow::on_mapRemoveTraceButton_clicked()
@@ -791,35 +957,10 @@ void MainWindow::on_udpConnectButton_clicked()
             mSerialPort->close();
         }
 
-        if (mTcpSocket->isOpen()) {
-            mTcpSocket->close();
-        }
-
         mPacketInterface->startUdpConnection(ip, ui->udpPortBox->value());
-
-        QHostAddress ip2;
-        if (ip2.setAddress(ui->udpIp2Edit->text().trimmed())) {
-            mPacketInterface->startUdpConnection2(ip2);
-        }
     } else {
         showStatusInfo("Invalid IP address", false);
     }
-}
-
-void MainWindow::on_udpPingButton_clicked()
-{
-    mPing->pingHost(ui->udpIpEdit->text(), 64, "UDP Host");
-}
-
-void MainWindow::on_tcpConnectButton_clicked()
-{
-    mTcpSocket->abort();
-    mTcpSocket->connectToHost(ui->tcpIpEdit->text(), ui->tcpPortBox->value());
-}
-
-void MainWindow::on_tcpPingButton_clicked()
-{
-    mPing->pingHost(ui->tcpIpEdit->text(), 64, "TCP Host");
 }
 
 void MainWindow::on_mapZeroButton_clicked()
@@ -846,12 +987,7 @@ void MainWindow::on_jsConnectButton_clicked()
         qDebug() << "Buttons:" << mJoystick->numButtons();
         qDebug() << "Name:" << mJoystick->getName();
 
-
-        if (mJoystick->getName().contains("Sony PLAYSTATION(R)3")) {
-            mJsType = JS_TYPE_PS3;
-            qDebug() << "Treating joystick as PS3 USB controller.";
-            showStatusInfo("PS4 USB joystick connected!", true);
-        } else if (mJoystick->getName().contains("sony", Qt::CaseInsensitive)) {
+        if (mJoystick->getName().contains("sony", Qt::CaseInsensitive)) {
             mJsType = JS_TYPE_PS4;
             qDebug() << "Treating joystick as PS4 USB controller.";
             showStatusInfo("PS4 USB joystick connected!", true);
@@ -903,8 +1039,8 @@ void MainWindow::on_genCircButton_clicked()
     double rad = ui->genCircRadBox->value();
     double speed = ui->mapRouteSpeedBox->value() / 3.6;
     double ang_ofs = M_PI;
-    double cx = 0.0;
-    double cy = 0.0;
+    double cx = 0;
+    double cy = 0;
     int points = ui->genCircPointsBox->value();
     int type = ui->genCircCenterBox->currentIndex();
 
@@ -923,28 +1059,12 @@ void MainWindow::on_genCircButton_clicked()
                 ang_ofs = ang + M_PI;
             }
         }
-    } else if (type == 3) {
-        cx = ui->genCircXBox->value();
-        cy = ui->genCircYBox->value();
-    } else if (type == 4) {
-        QList<LocPoint> r = ui->mapWidget->getRoute();
-        int samples = 0;
-        cx = 0.0;
-        cy = 0.0;
-
-        for (LocPoint lp: r) {
-            cx += lp.getX();
-            cy += lp.getY();
-            samples++;
-        }
-
-        if (samples > 0) {
-            cx /= (double)samples;
-            cy /= (double)samples;
-        }
     }
 
-    QList<LocPoint> route;
+    if (type == 3) {
+        cx = ui->genCircXBox->value();
+        cy = ui->genCircYBox->value();
+    }
 
     for (int i = 1;i <= points;i++) {
         int ind = i;
@@ -962,11 +1082,12 @@ void MainWindow::on_genCircButton_clicked()
         px += cx;
         py += cy;
 
+        ui->mapWidget->addRoutePoint(px, py, speed);
+
         bool res = true;
         LocPoint pos;
         pos.setXY(px, py);
         pos.setSpeed(speed);
-        route.append(pos);
 
         QList<LocPoint> points;
         points.append(pos);
@@ -983,21 +1104,13 @@ void MainWindow::on_genCircButton_clicked()
             break;
         }
     }
-
-    if (ui->genCircAppendCurrentBox->isChecked()) {
-        for (LocPoint p: route) {
-            ui->mapWidget->addRoutePoint(p.getX(), p.getY(), p.getSpeed(), p.getTime());
-        }
-    } else {
-        ui->mapWidget->addRoute(route);
-    }
 }
 
 void MainWindow::on_mapSetAbsYawButton_clicked()
 {
     CarInfo *car = ui->mapWidget->getCarInfo(ui->mapCarBox->value());
     if (car) {
-        if (mSerialPort->isOpen() || mPacketInterface->isUdpConnected() || mTcpSocket->isOpen()) {
+        if (mSerialPort->isOpen() || mPacketInterface->isUdpConnected()) {
             ui->mapSetAbsYawButton->setEnabled(false);
             ui->mapAbsYawSlider->setEnabled(false);
             bool ok = mPacketInterface->setYawOffsetAck(car->getId(), (double)ui->mapAbsYawSlider->value());
@@ -1039,7 +1152,7 @@ void MainWindow::on_stopButton_clicked()
 
 void MainWindow::on_mapUploadRouteButton_clicked()
 {
-    if (!mSerialPort->isOpen() && !mPacketInterface->isUdpConnected() && !mTcpSocket->isOpen()) {
+    if (!mSerialPort->isOpen() && !mPacketInterface->isUdpConnected()) {
         QMessageBox::warning(this, "Upload route",
                              "Serial port not connected.");
         return;
@@ -1137,6 +1250,11 @@ void MainWindow::on_mapUpdateSpeedButton_clicked()
     }
 
     ui->mapWidget->setRoute(route);
+}
+
+void MainWindow::on_udpPingButton_clicked()
+{
+    mPing->pingHost(ui->udpIpEdit->text(), 64, "UDP Host");
 }
 
 void MainWindow::on_mapOpenStreetMapBox_toggled(bool checked)
@@ -1448,143 +1566,150 @@ void MainWindow::on_actionExit_triggered()
     qApp->exit();
 }
 
-void MainWindow::on_actionSaveRoutes_triggered()
+#ifdef HAS_SBS
+bool MainWindow::initializeCar(quint8 id, bool hasCar, bool hasBase)
 {
-    QString filename = QFileDialog::getSaveFileName(this,
-                                                    tr("Save Routes"), ".",
-                                                    tr("Xml files (*.xml)"));
+    bool carExists = false;
 
-    // Cancel pressed
-    if (filename.isEmpty()) {
-        return;
-    }
+    if (hasCar) {
+        // Connect serial, MOTE
+        if(!mSerialPort->isOpen()) {
+            ui->serialRefreshButton->click();
 
-    if (!filename.toLower().endsWith(".xml")) {
-        filename.append(".xml");
-    }
-
-    QFile file(filename);
-    if (!file.open(QIODevice::WriteOnly)) {
-        QMessageBox::critical(this, "Save Routes",
-                              "Could not open\n" + filename + "\nfor writing");
-        showStatusInfo("Could not save routes", false);
-        return;
-    }
-
-
-    QXmlStreamWriter stream(&file);
-    stream.setCodec("UTF-8");
-    stream.setAutoFormatting(true);
-    stream.writeStartDocument();
-
-    stream.writeStartElement("routes");
-
-    QList<QList<LocPoint> > routes = ui->mapWidget->getRoutes();
-
-    for (QList<LocPoint> route: routes) {
-        stream.writeStartElement("route");
-        for (LocPoint p: route) {
-            stream.writeStartElement("point");
-            stream.writeTextElement("x", QString::number(p.getX()));
-            stream.writeTextElement("y", QString::number(p.getY()));
-            stream.writeTextElement("speed", QString::number(p.getSpeed()));
-            stream.writeTextElement("time", QString::number(p.getTime()));
-            stream.writeEndElement();
-        }
-        stream.writeEndElement();
-    }
-
-    stream.writeEndDocument();
-    file.close();
-    showStatusInfo("Saved routes", true);
-}
-
-void MainWindow::on_actionLoadRoutes_triggered()
-{
-    QString filename = QFileDialog::getOpenFileName(this,
-                                                    tr("Load Routes"), ".",
-                                                    tr("Xml files (*.xml)"));
-
-    if (!filename.isEmpty()) {
-        QFile file(filename);
-        if (!file.open(QIODevice::ReadOnly)) {
-            QMessageBox::critical(this, "Load Routes",
-                                  "Could not open\n" + filename + "\nfor reading");
-            return;
-        }
-
-        QXmlStreamReader stream(&file);
-
-        // Look for routes tag
-        bool routes_found = false;
-        while (stream.readNextStartElement()) {
-            if (stream.name() == "routes") {
-                routes_found = true;
-                break;
-            }
-        }
-
-        if (routes_found) {
-            QList<QList<LocPoint> > routes;
-
-            while (stream.readNextStartElement()) {
-                QString name = stream.name().toString();
-
-                if (name == "route") {
-                    QList<LocPoint> route;
-
-                    while (stream.readNextStartElement()) {
-                        QString name2 = stream.name().toString();
-
-                        if (name2 == "point") {
-                            LocPoint p;
-
-                            while (stream.readNextStartElement()) {
-                                QString name3 = stream.name().toString();
-
-                                if (name3 == "x") {
-                                    p.setX(stream.readElementText().toDouble());
-                                } else if (name3 == "y") {
-                                    p.setY(stream.readElementText().toDouble());
-                                } else if (name3 == "speed") {
-                                    p.setSpeed(stream.readElementText().toDouble());
-                                } else if (name3 == "time") {
-                                    p.setTime(stream.readElementText().toInt());
-                                } else {
-                                    qWarning() << ": Unknown XML element :" << name2;
-                                    stream.skipCurrentElement();
-                                }
-                            }
-
-                            route.append(p);
-                        } else {
-                            qWarning() << ": Unknown XML element :" << name2;
-                            stream.skipCurrentElement();
-                        }
-
-                        if (stream.hasError()) {
-                            qWarning() << " : XML ERROR :" << stream.errorString();
-                        }
-                    }
-
-                    routes.append(route);
-                }
-
-                if (stream.hasError()) {
-                    qWarning() << "XML ERROR :" << stream.errorString();
-                    qWarning() << stream.lineNumber() << stream.columnNumber();
+            for (int i=0; i<ui->serialPortBox->count(); ++i) {
+                ui->serialPortBox->setCurrentIndex(i);
+                if (ui->serialPortBox->currentText() == "COM3") {
+                    ui->serialConnectButton->click();
+                    break;
                 }
             }
 
-            for (QList<LocPoint> r: routes) {
-                ui->mapWidget->addRoute(r);
+            if(!mSerialPort->isOpen()) {
+                ui->networkInterface->sendError(
+                            "Is the MOTE connected? It should appear as COM 3."
+                            , "Couldn't find MOTE"
+                            );
+                return 0;
             }
+        }
+    }
 
-            file.close();
-            showStatusInfo("Loaded routes", true);
-        } else {
-            QMessageBox::critical(this, "Load Routes",
-                                  "routes tag not found in " + filename);
+
+    // Add car
+    for (int i=0; i<mCars.size(); ++i) {
+        if (mCars[i]->getId() == id) {
+            carExists = true;
+        }
+    }
+
+    if (!carExists) {
+        CarInterface *car = new CarInterface(this);
+        mCars.append(car);
+        QString name;
+        name.sprintf("Car %d", id);
+        car->setID(id);
+        ui->carsWidget->addTab(car, name);
+        car->setMap(ui->mapWidget);
+        car->setPacketInterface(mPacketInterface);
+        connect(car, SIGNAL(showStatusInfo(QString,bool)), this, SLOT(showStatusInfo(QString,bool)));
+
+        // Expose base station and nmeawidget to networkinterface
+        BaseStation *pBase = ui->baseStationWidget;
+        ui->networkInterface->setBaseStation(pBase);
+
+        NmeaWidget *pNmea = car->getNmeaWidget();
+        pNmea->setId(id);
+        ui->networkInterface->setNmeaWidget(pNmea);
+    }
+
+
+    if (hasBase) {
+        // Initialize base station
+        if (!ui->baseStationWidget->initialize()) {
+            ui->networkInterface->sendError(
+                        "Is the ublox connected? It should appear as COM (No.)."
+                        , "Couldn't find/connect to ublox"
+                        );
+            return 0;
+        }
+    }
+
+
+    // Clear route
+    on_mapRemoveRouteButton_clicked();
+
+    return 1;
+}
+
+void MainWindow::setRPiClock(int id)
+{
+    for (int i=0; i<mCars.size(); ++i) {
+        if (mCars[i]->getId() == id) {
+            mCars[i]->setRPiClock();
         }
     }
 }
+
+void MainWindow::xboxButtonToggled(bool checked)
+{
+    mXbox = checked;
+    ui->throttleGainBox->setEnabled(!checked);
+    ui->steeringGainBox->setEnabled(!checked);
+    ui->throttleDutyButton->setEnabled(!checked);
+    ui->throttleCurrentButton->setEnabled(!checked);
+}
+
+void MainWindow::setUpdateRouteFromMap(int id, bool enabled)
+{
+    for (int i=0; i<mCars.size(); ++i) {
+        if (mCars[i]->getId() == id) {
+            mCars[i]->setUpdateRouteFromMap(enabled);
+        }
+    }
+}
+
+void MainWindow::setL1(bool L1) {
+    mL1 = L1;
+}
+
+void MainWindow::setR1(bool R1) {
+    mR1 = R1;
+}
+
+void MainWindow::setL2(double L2) {
+    mL2 = L2;
+}
+
+void MainWindow::setR2(double R2) {
+    mR2 = R2;
+}
+
+void MainWindow::setAxisLeftX(double AxisLeftX) {
+    mAxisLeftX = AxisLeftX;
+}
+
+void MainWindow::setAxisLeftY(double AxisLeftY) {
+    mAxisLeftY = AxisLeftY;
+}
+
+void MainWindow::setY(bool Y) {
+    mY = Y;
+}
+
+void MainWindow::setA(bool A) {
+    mA = A;
+}
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+

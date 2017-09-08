@@ -23,13 +23,16 @@
 #include <QTimer>
 #include <QSerialPort>
 #include <QLabel>
-#include <QTcpSocket>
 #include "carinterface.h"
 #include "copterinterface.h"
 #include "packetinterface.h"
 #include "ping.h"
 #include "nmeaserver.h"
-#include "rtcm3_simple.h"
+
+#ifdef HAS_SBS
+#include <QCheckBox>
+#include <QHBoxLayout>
+#endif
 
 #ifdef HAS_JOYSTICK
 #include "joystick.h"
@@ -47,6 +50,20 @@ public:
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
     bool eventFilter(QObject *object, QEvent *e);
+
+#ifdef HAS_SBS
+    bool initializeCar(quint8 id, bool hasCar, bool hasBase);
+    void setUpdateRouteFromMap(int id, bool enabled);
+    void setRPiClock(int id);
+    Q_INVOKABLE void setL1(bool L1);
+    Q_INVOKABLE void setR1(bool R1);
+    Q_INVOKABLE void setL2(double L2);
+    Q_INVOKABLE void setR2(double R2);
+    Q_INVOKABLE void setAxisLeftX(double AxisLeftX);
+    Q_INVOKABLE void setAxisLeftY(double AxisLeftY);
+    Q_INVOKABLE void setY(bool Y);
+    Q_INVOKABLE void setA(bool A);
+#endif
 
 private slots:
     void serialDataAvailable();
@@ -66,10 +83,6 @@ private slots:
     void nmeaGgaRx(int fields, NmeaServer::nmea_gga_info_t gga);
     void routePointAdded(LocPoint pos);
     void infoTraceChanged(int traceNow);
-    void tcpInputConnected();
-    void tcpInputDisconnected();
-    void tcpInputDataAvailable();
-    void tcpInputError(QAbstractSocket::SocketError socketError);
 
     void on_carAddButton_clicked();
     void on_copterAddButton_clicked();
@@ -79,9 +92,6 @@ private slots:
     void on_mapRemoveTraceButton_clicked();
     void on_MapRemovePixmapsButton_clicked();
     void on_udpConnectButton_clicked();
-    void on_udpPingButton_clicked();
-    void on_tcpConnectButton_clicked();
-    void on_tcpPingButton_clicked();
     void on_mapZeroButton_clicked();
     void on_mapRemoveRouteButton_clicked();
     void on_mapRouteSpeedBox_valueChanged(double arg1);
@@ -99,6 +109,7 @@ private slots:
     void on_mapKbButton_clicked();
     void on_mapOffButton_clicked();
     void on_mapUpdateSpeedButton_clicked();
+    void on_udpPingButton_clicked();
     void on_mapOpenStreetMapBox_toggled(bool checked);
     void on_mapAntialiasOsmBox_toggled(bool checked);
     void on_mapOsmResSlider_valueChanged(int value);
@@ -134,8 +145,10 @@ private slots:
     void on_actionAbout_triggered();
     void on_actionAboutLibrariesUsed_triggered();
     void on_actionExit_triggered();
-    void on_actionSaveRoutes_triggered();
-    void on_actionLoadRoutes_triggered();
+
+#ifdef HAS_SBS
+    void xboxButtonToggled(bool checked);
+#endif
 
 private:
     Ui::MainWindow *ui;
@@ -155,9 +168,25 @@ private:
     Ping *mPing;
     NmeaServer *mNmea;
     QUdpSocket *mUdpSocket;
-    QTcpSocket *mTcpSocket;
     QString mVersion;
-    rtcm3_state mRtcmState;
+
+#ifdef HAS_SBS
+    QCheckBox *xbox;
+    QHBoxLayout *layout;
+    bool mXbox;
+    double mBrakeValue;
+    double mSpeed;
+    double mLimit;
+
+    bool mL1;
+    bool mR1;
+    double mL2;
+    double mR2;
+    double mAxisLeftX;
+    double mAxisLeftY;
+    bool mY;
+    bool mA;
+#endif
 
 #ifdef HAS_JOYSTICK
     Joystick *mJoystick;

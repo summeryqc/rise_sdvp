@@ -61,5 +61,9 @@
         <file>Icons/Airplane Front View-96.png</file>
         <file>Icons/Code-96.png</file>
         <file>Icons/About-96.png</file>
+        <file>Icons/Car-96_white.png</file>
+    </qresource>
+    <qresource prefix="/">
+        <file>xbox.qml</file>
     </qresource>
 </RCC>

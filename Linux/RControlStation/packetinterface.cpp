@@ -74,7 +74,6 @@ PacketInterface::PacketInterface(QObject *parent) :
     mTimer->start();
 
     mHostAddress = QHostAddress("0.0.0.0");
-    mHostAddress2 = QHostAddress("0.0.0.0");
     mUdpPort = 0;
     mUdpSocket = new QUdpSocket(this);
     mUdpServer = false;
@@ -216,13 +215,7 @@ bool PacketInterface::sendPacket(const unsigned char *data, unsigned int len_pac
         memcpy(mSendBufferAck + ind, data, len_packet);
         ind += len_packet;
 
-        QByteArray toSend = QByteArray::fromRawData((const char*)mSendBufferAck, ind);
-        mUdpSocket->writeDatagram(toSend, mHostAddress, mUdpPort);
-
-        if (QString::compare(mHostAddress2.toString(), "0.0.0.0") != 0) {
-            mUdpSocket->writeDatagram(toSend, mHostAddress2, mUdpPort);
-        }
-
+        mUdpSocket->writeDatagram(QByteArray::fromRawData((const char*)mSendBufferAck, ind), mHostAddress, mUdpPort);
         return true;
     }
 
@@ -592,6 +585,53 @@ void PacketInterface::processPacket(const unsigned char *data, int len)
         state.ap_goal_py = utility::buffer_get_double32(data, 1e4, &ind);
         state.ap_rad = utility::buffer_get_double32(data, 1e6, &ind);
         state.ms_today = utility::buffer_get_int32(data, &ind);
+
+#ifdef HAS_SBS
+        // Log
+        if (enableLog) {
+            QString carState;
+            QTime time;
+            ++sample;
+
+            if (mFirstPoll) {
+                mFirstPoll = false;
+                sample = 0;
+                carState = " - - - Poll started at " + time.currentTime().toString("hh:mm:ss.zzzzz") + " - - -";
+            }
+
+            carState += "\nsample:\t" + QString().number(sample) + "\n";
+            carState += "timestamp:\t" + time.currentTime().toString("hh:mm:ss.zzzzz") + "\n";
+            carState += "id:\t" + QString().number(id) + "\n";
+            carState += "roll:\t" + QString().number(state.roll) + "\n";
+            carState += "pitch:\t" + QString().number(state.pitch) + "\n";
+            carState += "yaw:\t" + QString().number(state.yaw) + "\n";
+            carState += "accel_0:\t" + QString().number(state.accel[0]) + "\n";
+            carState += "accel_1:\t" + QString().number(state.accel[1]) + "\n";
+            carState += "accel_2:\t" + QString().number(state.accel[2]) + "\n";
+            carState += "gyro_0:\t" + QString().number(state.gyro[0]) + "\n";
+            carState += "gyro_1:\t" + QString().number(state.gyro[1]) + "\n";
+            carState += "gyro_2:\t" + QString().number(state.gyro[2]) + "\n";
+            carState += "mag_0:\t" + QString().number(state.mag[0]) + "\n";
+            carState += "mag_1:\t" + QString().number(state.mag[1]) + "\n";
+            carState += "mag_2:\t" + QString().number(state.mag[2]) + "\n";
+            carState += "px:\t" + QString().number(state.px) + "\n";
+            carState += "py:\t" + QString().number(state.py) + "\n";
+            carState += "speed:\t" + QString().number(state.speed) + "\n";
+            carState += "vin:\t" + QString().number(state.vin) + "\n";
+            carState += "temp_fet:\t" + QString().number(state.temp_fet) + "\n";
+            carState += "mc_fault:\t" + QString().number(state.mc_fault) + "\n";
+            carState += "px_gps:\t" + QString().number(state.px_gps) + "\n";
+            carState += "py_gps:\t" + QString().number(state.py_gps) + "\n";
+            carState += "ap_goal_px:\t" + QString().number(state.ap_goal_px) + "\n";
+            carState += "ap_goal_py:\t" + QString().number(state.ap_goal_py) + "\n";
+            carState += "ap_rad:\t" + QString().number(state.ap_rad) + "\n";
+            carState += "ms_today:\t" + QString().number(state.ms_today) + "\n";
+
+            QTextStream outstream(outputFile);
+            outstream << carState;
+        }
+#endif
+
         emit stateReceived(id, state);
     } break;
 
@@ -691,11 +731,6 @@ void PacketInterface::startUdpConnection(QHostAddress ip, int port)
     mUdpSocket->bind(QHostAddress::Any, mUdpPort + 1);
 }
 
-void PacketInterface::startUdpConnection2(QHostAddress ip)
-{
-    mHostAddress2 = ip;
-}
-
 void PacketInterface::startUdpConnectionServer(int port)
 {
     mUdpPort = port + 1;
@@ -707,7 +742,6 @@ void PacketInterface::startUdpConnectionServer(int port)
 void PacketInterface::stopUdpConnection()
 {
     mHostAddress = QHostAddress("0.0.0.0");
-    mHostAddress2 = QHostAddress("0.0.0.0");
     mUdpPort = 0;
     mUdpServer = false;
     mUdpSocket->close();
@@ -1049,7 +1083,7 @@ void PacketInterface::setRcControlCurrentBrake(quint8 id, double current, double
     sendPacket(mSendBuffer, send_index);
 }
 
-void PacketInterface::setRcControlDuty(quint8 id, double duty, double steering)
+void PacketInterface::setRcControlDuty(quint8 id, double duty, double steering) // *
 {
     qint32 send_index = 0;
     mSendBuffer[send_index++] = id;
@@ -1188,3 +1222,36 @@ void PacketInterface::mrOverridePower(quint8 id, double fl_f, double bl_l, doubl
     utility::buffer_append_double32_auto(mSendBuffer, br_b, &send_index);
     sendPacket(mSendBuffer, send_index);
 }
+
+#ifdef HAS_SBS
+void PacketInterface::setFirstPoll(bool checked)
+{
+    mFirstPoll = checked;
+}
+
+void PacketInterface::setLogEnabled(bool enable)
+{
+    enableLog = enable;
+
+    if (enableLog) {
+        // Create a log folder
+        QString folderPath = qApp->applicationDirPath() + "/Logs";
+
+        if (!QDir(folderPath).exists()) {
+            QDir().mkdir(folderPath);
+        }
+
+        // Create file path
+        QDate qdate;
+        QString outputFilePath = folderPath + qdate.currentDate().toString("/yyyy_MM_dd_") + "carStateLog.txt";
+
+        // Create and open log file
+        outputFile = new QFile(outputFilePath);
+        if (!outputFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Append))
+        {
+            qDebug() << "Error - packetinterface.cpp, line 101\nCan not open file";
+        }
+    }
+}
+
+#endif

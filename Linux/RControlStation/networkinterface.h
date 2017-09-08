@@ -27,6 +27,12 @@
 #include "carinterface.h"
 #include "mapwidget.h"
 
+#ifdef HAS_SBS
+#include "basestation.h"
+#include "nmeawidget.h"
+#include "mainwindow.h"
+#endif
+
 namespace Ui {
 class NetworkInterface;
 }
@@ -44,6 +50,17 @@ public:
     void sendState(quint8 id, const CAR_STATE &state);
     void sendEnuRef(quint8 id, double lat, double lon, double height);
     void sendError(const QString &txt, const QString &cmd = "");
+
+#ifdef HAS_SBS
+    void connectUDP();
+    void setMainWindow(MainWindow *mainWindow);
+    void setBaseStation(BaseStation *baseUi);
+    void setNmeaWidget(NmeaWidget *nmeaUI);
+    void sendOk(quint8 id);
+    void sendInitializeCar(quint8 id, bool hasCar, bool hasBase);
+    void sendBaseStation(quint8 id);
+    void sendSolution(quint8 id);
+#endif
 
 private slots:
     void tcpDataRx(const QByteArray &data);
@@ -71,6 +88,13 @@ private:
     void processData(const QByteArray &data);
     void processXml(const QByteArray &xml);
     void sendData(const QByteArray &data);
+
+#ifdef HAS_SBS
+    BaseStation *pBase;
+    MainWindow *pMainWindow;
+    QList<NmeaWidget*> pNmea;
+    bool ready;
+#endif
 
 };
 

@@ -1505,6 +1505,13 @@
       </widget>
      </item>
      <item>
+      <widget class="QCheckBox" name="checkBox">
+       <property name="text">
+        <string>Log car state</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="clearRouteButton">
        <property name="toolTip">
         <string>Clear stored route</string>

@@ -19,6 +19,11 @@
 #include <QApplication>
 #include <QStyleFactory>
 
+#ifdef HAS_SBS
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#endif
+
 int main(int argc, char *argv[])
 {
     //qputenv("QT_SCALE_FACTOR", QByteArray("1.5"));
@@ -36,7 +41,19 @@ int main(int argc, char *argv[])
     a.setApplicationName("RC Car Tool");
 
     MainWindow w;
+
+#ifdef HAS_SBS
+    // Has to be done in main, for some reason
+    QQmlApplicationEngine engine;
+    QQmlContext* ctx = engine.rootContext();
+    ctx->setContextProperty("mController", &w);
+    engine.load(QUrl(QStringLiteral("qrc:///xbox.qml")));
+
+    w.showMinimized();
+
+#else
     w.show();
+#endif
 
     return a.exec();
 }

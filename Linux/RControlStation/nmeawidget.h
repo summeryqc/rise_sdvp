@@ -32,7 +32,13 @@ class NmeaWidget : public QWidget
 public:
     explicit NmeaWidget(QWidget *parent = 0);
     ~NmeaWidget();
-    void inputNmea(QByteArray msg);
+    void inputNmea(QByteArray msg);    
+
+#ifdef HAS_SBS
+    QString getSolution();
+    int getId();
+    void setId(int id);
+#endif
 
 private slots:
     void on_nmeaLogChooseButton_clicked();
@@ -42,6 +48,10 @@ private slots:
 private:
     Ui::NmeaWidget *ui;
     TcpBroadcast *mNmeaForwardServer;
+
+#ifdef HAS_SBS
+    int mId;
+#endif
 
 };
 

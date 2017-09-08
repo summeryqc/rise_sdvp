@@ -25,6 +25,10 @@
 #include "utility.h"
 #include "rtcm3_simple.h"
 
+#ifdef HAS_SBS
+#include "networkinterface.h"
+#endif
+
 BaseStation::BaseStation(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::BaseStation)
@@ -66,6 +70,21 @@ BaseStation::BaseStation(QWidget *parent) :
 
     updateNmeaText();
     on_ubxSerialRefreshButton_clicked();
+
+
+#ifdef HAS_SBS
+    proceed = false;
+    valid = true;
+    lastOkPosX = 0.0;
+    lastOkPosY = 0.0;
+    lastOkPosZ = 0.0;
+    xMaxNow = 0.0;
+    yMaxNow = 0.0;
+    zMaxNow = 0.0;
+    xMaxAvg = 0.0;
+    yMaxAvg = 0.0;
+    zMaxAvg = 0.0;
+#endif
 }
 
 BaseStation::~BaseStation()
@@ -339,6 +358,15 @@ void BaseStation::on_nmeaSampleClearButton_clicked()
     mZAvg = 0.0;
     mAvgSamples = 0.0;
 
+#ifdef HAS_SBS
+    xMaxNow = 0;
+    yMaxNow = 0;
+    zMaxNow = 0;
+    xMaxAvg = 0;
+    yMaxAvg = 0;
+    zMaxAvg = 0;
+#endif
+
     updateNmeaText();
 }
 
@@ -365,6 +393,44 @@ void BaseStation::updateNmeaText()
 
     statStr += QString().sprintf("XYZ Avg: %.3f, %.3f, %.3f\n", xAvg, yAvg, zAvg);
     statStr += QString().sprintf("LLH Avg: %.8f, %.8f, %.3f", lat_avg, lon_avg, height_avg);
+
+#ifdef HAS_SBS
+    if (lastOkPosX > 0) {
+        if ((fabs(lastOkPosX - mXNow)) > fabs(xMaxNow)) {
+            xMaxNow = lastOkPosX - mXNow;
+        }
+
+        if ((fabs(lastOkPosY - mYNow)) > fabs(yMaxNow)) {
+            yMaxNow = lastOkPosY - mYNow;
+        }
+
+        if ((fabs(lastOkPosZ - mZNow)) > fabs(zMaxNow)) {
+            zMaxNow = lastOkPosZ - mZNow;
+        }
+    }
+
+    if (lastOkPosX > 0) {
+        if ((fabs(lastOkPosX - xAvg)) > fabs(xMaxAvg)) {
+            xMaxAvg = lastOkPosX - xAvg;
+        }
+
+        if ((fabs(lastOkPosY - yAvg)) > fabs(yMaxAvg)) {
+            yMaxAvg = lastOkPosY - yAvg;
+        }
+
+        if ((fabs(lastOkPosZ - zAvg)) > fabs(zMaxAvg)) {
+            zMaxAvg = lastOkPosZ - zAvg;
+        }
+    }
+
+    statStr += QString().sprintf("\n\n\nLastOkPos: %.3f, %.3f, %.3f\n", lastOkPosX, lastOkPosY, lastOkPosZ);
+
+    statStr += QString().sprintf("\nNow diff from last:        %.3f, %.3f, %.3f", lastOkPosX - mXNow, lastOkPosY - mYNow, lastOkPosZ - mZNow);
+    statStr += QString().sprintf("\nNow maxdiff from last:   %.3f, %.3f, %.3f\n", xMaxNow, yMaxNow, zMaxNow);
+
+//    statStr += QString().sprintf("\nAvg diff from last:        %.3f, %.3f, %.3f", lastOkPosX - xAvg, lastOkPosY - yAvg, lastOkPosZ - zAvg);
+//    statStr += QString().sprintf("\nAvg max diff from last: %.3f, %.3f, %.3f", xMaxAvg, yMaxAvg, zMaxAvg);
+#endif
 
     ui->nmeaBrowser->setText(statStr);
 }
@@ -428,6 +494,7 @@ void BaseStation::on_refGetButton_clicked()
         ui->refSendLatBox->setValue(lat);
         ui->refSendLonBox->setValue(lon);
         ui->refSendHBox->setValue(height);
+
     } else {
         QMessageBox::warning(this, "Reference Position",
                              "No samples collected yet.");
@@ -447,3 +514,99 @@ void BaseStation::on_tcpServerBox_toggled(bool checked)
         mTcpServer->stopServer();
     }
 }
+
+#ifdef HAS_SBS
+bool BaseStation::initialize()
+{
+    if (!mUblox->isSerialConnected()) {
+        // Connect serial
+        ui->ubxSerialRefreshButton->click();
+        for (int i=0; i<ui->ubxSerialPortBox->count(); ++i) {
+            ui->ubxSerialPortBox->setCurrentIndex(i);
+            if (ui->ubxSerialPortBox->currentText() != "COM3") {
+                ui->ubxSerialConnectButton->click();
+
+                if (!mUblox->isSerialConnected()) {
+                    // Error: Failed to connect to ublox
+                    return 0;
+                }
+
+                // Configure basestation
+                configTimer = new QTimer(this);
+                connect(configTimer, SIGNAL(timeout()), this, SLOT(configTimerSlot()));
+                return 1;
+            }
+        }
+
+        // Error: Failed to find ublox
+        return 0;
+    }
+
+    return 1;
+}
+
+void BaseStation::configTimerSlot()
+{
+    if (mAvgSamples > 10 && !proceed) {
+        ui->nmeaSampleClearButton->click();
+        proceed = true;
+    }
+
+    if (mAvgSamples > 25 && proceed) {
+
+        lastOkPosX = mXAvg / mAvgSamples;
+        lastOkPosY = mYAvg / mAvgSamples;
+        lastOkPosZ = mZAvg / mAvgSamples;
+
+        on_refGetButton_clicked();
+        ui->sendBaseBox->setChecked(true);
+        ui->sendVehiclesBox->setChecked(true);
+
+        configTimer->stop();
+        proceed = false;
+    }
+}
+
+bool BaseStation::isValid()
+{   
+    double maxError = 0.001;
+
+    if (fabs(lastOkPosX - mXNow) < maxError
+            && fabs(lastOkPosY - mYNow) < maxError
+            && fabs(lastOkPosZ - mZNow) < maxError) {
+        valid = true;
+        return 1;
+
+    } else {
+
+        if (!configTimer->isActive() && valid) {
+            valid = false;
+            ui->nmeaSampleClearButton->click();
+            configTimer->start(1000);
+        }
+
+        return 0;
+    }
+}
+
+double BaseStation::getSamples()
+{
+    return mAvgSamples;
+}
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

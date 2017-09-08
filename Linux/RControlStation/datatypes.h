@@ -324,8 +324,7 @@ typedef struct {
 
 typedef enum {
     JS_TYPE_HK = 0,
-    JS_TYPE_PS4,
-    JS_TYPE_PS3
+    JS_TYPE_PS4
 } JS_TYPE;
 
 // ============== RTCM Datatypes ================== //
@@ -391,7 +390,6 @@ typedef struct {
 } rtcm_ephemeris_t;
 
 typedef struct {
-    bool decode_all;
     int buffer_ptr;
     int len;
     uint8_t buffer[1100];
@@ -539,59 +537,5 @@ typedef struct {
      */
     uint8_t utc_standard;
 } ubx_cfg_nav5;
-
-// Chronos messages
-
-typedef enum {
-    CHRONOS_MSG_DOPM = 1,
-    CHRONOS_MSG_OSEM,
-    CHRONOS_MSG_OSTM,
-    CHRONOS_MSG_STRT,
-    CHRONOS_MSG_HEAB,
-    CHRONOS_MSG_MONR
-} CHRONOS_MSG;
-
-typedef struct {
-    uint32_t tRel;
-    double x;
-    double y;
-    double z;
-    double heading;
-    double speed;
-    int16_t accel;
-    int16_t curvature;
-    uint8_t mode;
-} chronos_dopm_pt;
-
-typedef struct {
-    double lat;
-    double lon;
-    double alt;
-    double heading;
-} chronos_osem;
-
-typedef struct {
-    bool armed;
-} chronos_ostm;
-
-typedef struct {
-    uint8_t type;
-    uint64_t ts;
-} chronos_strt;
-
-typedef struct {
-    uint8_t status;
-} chronos_heab;
-
-typedef struct {
-    uint64_t ts;
-    double lat;
-    double lon;
-    double alt;
-    double speed;
-    double heading;
-    uint8_t direction;
-    uint8_t status;
-} chronos_monr;
 
 #endif /* DATATYPES_H_ */

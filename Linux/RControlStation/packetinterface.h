@@ -25,6 +25,13 @@
 #include "datatypes.h"
 #include "locpoint.h"
 
+#ifdef HAS_SBS
+#include <QFile>
+#include <QDate>
+#include <QDir>
+#include <QApplication>
+#endif
+
 class PacketInterface : public QObject
 {
     Q_OBJECT
@@ -38,7 +45,6 @@ public:
                        int retries, int timeoutMs = 200);
     void processData(QByteArray &data);
     void startUdpConnection(QHostAddress ip, int port);
-    void startUdpConnection2(QHostAddress ip);
     void startUdpConnectionServer(int port);
     void stopUdpConnection();
     bool isUdpConnected();
@@ -63,6 +69,11 @@ public:
                          double lon = 0,
                          double height = 0,
                          int retries = 10);
+
+#ifdef HAS_SBS
+    void setFirstPoll(bool checked);
+    void setLogEnabled(bool enable);
+#endif
 
 signals:
     void dataToSend(QByteArray &data);
@@ -117,7 +128,6 @@ private:
     quint8 *mSendBuffer;
     QUdpSocket *mUdpSocket;
     QHostAddress mHostAddress;
-    QHostAddress mHostAddress2;
     int mUdpPort;
     bool mUdpServer;
     bool mWaitingAck;
@@ -132,6 +142,18 @@ private:
     unsigned int mRxDataPtr;
     unsigned char mCrcLow;
     unsigned char mCrcHigh;
+
+#ifdef HAS_SBS
+    int interval = 0;
+    bool doAvg = false;
+    bool once = true;
+    double yawSamples[500];
+    bool mFirstPoll;
+    bool enableLog = false;
+    QFile* outputFile;
+    ulong sample;
+    double ofs = 0;
+#endif
     
 };
 

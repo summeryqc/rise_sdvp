@@ -626,16 +626,53 @@ void Ublox::serialPortError(QSerialPort::SerialPortError error)
     }
 }
 
-void Ublox::ubx_send(QByteArray data)
+void Ublox::ubx_send(unsigned char *data, unsigned int len)
 {
     if (mSerialPort->isOpen()) {
-        mSerialPort->write(data);
+        mSerialPort->write((char*)data, len);
     }
 }
 
 bool Ublox::ubx_encode_send(uint8_t msg_class, uint8_t id, uint8_t *msg, int len, int timeoutMs)
 {
-    auto ubx = ubx_encode(msg_class, id, QByteArray((const char*)msg, len));
+    uint8_t ubx[2048];
+
+    int ind = 0;
+    uint8_t ck_a = 0;
+    uint8_t ck_b = 0;
+
+    ubx[ind++] = 0xB5;
+    ubx[ind++] = 0x62;
+
+    ubx[ind] = msg_class;
+    ck_a += ubx[ind];
+    ck_b += ck_a;
+    ind++;
+
+    ubx[ind] = id;
+    ck_a += ubx[ind];
+    ck_b += ck_a;
+    ind++;
+
+    ubx[ind] = len & 0xFF;
+    ck_a += ubx[ind];
+    ck_b += ck_a;
+    ind++;
+
+    ubx[ind] = (len >> 8) & 0xFF;
+    ck_a += ubx[ind];
+    ck_b += ck_a;
+    ind++;
+
+    for (int i = 0;i < len;i++) {
+        ubx[ind] = msg[i];
+        ck_a += ubx[ind];
+        ck_b += ck_a;
+        ind++;
+    }
+
+    ubx[ind++] = ck_a;
+    ubx[ind++] = ck_b;
 
     bool retVal = false;
     if (timeoutMs > 0) {
@@ -648,68 +685,29 @@ bool Ublox::ubx_encode_send(uint8_t msg_class, uint8_t id, uint8_t *msg, int len
             QTimer timeoutTimer;
             timeoutTimer.setSingleShot(true);
             timeoutTimer.start(timeoutMs);
-            auto conn = connect(this, &Ublox::rxAck,
-                                [&loop, &retVal](uint8_t, uint8_t){retVal = true; loop.quit();});
+            connect(this, SIGNAL(rxAck(uint8_t,uint8_t)), &loop, SLOT(quit()));
             connect(this, SIGNAL(rxNak(uint8_t,uint8_t)), &loop, SLOT(quit()));
             connect(&timeoutTimer, SIGNAL(timeout()), &loop, SLOT(quit()));
 
-            ubx_send(ubx);
+            ubx_send(ubx, ind);
             loop.exec();
 
-            disconnect(conn);
+            if (timeoutTimer.isActive()) {
+                retVal = true;
+            }
 
             mWaitingAck = false;
         }
     } else {
-        ubx_send(ubx);
+        ubx_send(ubx, ind);
         retVal = true;
     }
 
     return retVal;
 }
 
-QByteArray Ublox::ubx_encode(uint8_t msg_class, uint8_t id, const QByteArray &data)
-{
-    QByteArray ubx;
-
-    uint8_t ck_a = 0;
-    uint8_t ck_b = 0;
-
-    ubx.append(0xB5);
-    ubx.append(0x62);
-
-    ubx.append(msg_class);
-    ck_a += ubx.at(ubx.size() - 1);
-    ck_b += ck_a;
-
-    ubx.append(id);
-    ck_a += ubx.at(ubx.size() - 1);
-    ck_b += ck_a;
-
-    ubx.append(data.size() & 0xFF);
-    ck_a += ubx.at(ubx.size() - 1);
-    ck_b += ck_a;
-
-    ubx.append((data.size() >> 8) & 0xFF);
-    ck_a += ubx.at(ubx.size() - 1);
-    ck_b += ck_a;
-
-    for (int i = 0;i < data.size();i++) {
-        ubx.append(data.at(i));
-        ck_a += data.at(i);
-        ck_b += ck_a;
-    }
-
-    ubx.append(ck_a);
-    ubx.append(ck_b);
-
-    return ubx;
-}
-
 void Ublox::ubx_decode(uint8_t msg_class, uint8_t id, uint8_t *msg, int len)
 {
-    emit ubxRx(ubx_encode(msg_class, id, QByteArray((const char*)msg, len)));
-
     switch (msg_class) {
     case UBX_CLASS_NAV: {
         switch (id) {

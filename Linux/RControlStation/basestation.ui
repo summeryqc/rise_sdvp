@@ -335,9 +335,6 @@
         </spacer>
        </item>
       </layout>
-      <zorder>groupBox_3</zorder>
-      <zorder>basePosBox</zorder>
-      <zorder>tcpServerBox</zorder>
      </widget>
      <widget class="QWidget" name="tab">
       <attribute name="icon">

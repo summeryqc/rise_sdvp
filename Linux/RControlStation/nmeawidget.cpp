@@ -31,6 +31,10 @@ NmeaWidget::NmeaWidget(QWidget *parent) :
     layout()->setContentsMargins(0, 0, 0, 0);
 
     mNmeaForwardServer = new TcpBroadcast(this);
+
+#ifdef HAS_SBS
+    ui->nmeaFixTypeLabel->setText("Solution:");
+#endif
 }
 
 NmeaWidget::~NmeaWidget()
@@ -120,3 +124,28 @@ void NmeaWidget::on_nmeaServerActiveBox_toggled(bool checked)
         mNmeaForwardServer->stopServer();
     }
 }
+
+#ifdef HAS_SBS
+QString NmeaWidget::getSolution()
+{
+    return ui->nmeaFixTypeLabel->text();
+}
+
+int NmeaWidget::getId()
+{
+    return mId;
+}
+
+void NmeaWidget::setId(int id)
+{
+    mId = id;
+}
+#endif
+
+
+
+
+
+
+
+

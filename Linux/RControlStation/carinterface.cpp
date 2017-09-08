@@ -71,7 +71,6 @@ CarInterface::CarInterface(QWidget *parent) :
     mLastHostAddress.clear();
     mUdpPort = 27800;
     mTcpServer = new TcpServerSimple(this);
-    mFaultLast = "Fault code...";
 
     connect(mTimer, SIGNAL(timeout()), this, SLOT(timerSlot()));
     connect(mUdpSocket, SIGNAL(readyRead()), this, SLOT(udpReadReady()));
@@ -185,8 +184,9 @@ void CarInterface::setStateData(CAR_STATE data)
     bool isOk;
     faultToStr(data.mc_fault, fault_str, isOk);
 
-    if (mFaultLast != fault_str) {
-        mFaultLast = fault_str;
+    static QString fault_last = "Fault code...";
+    if (fault_last != fault_str) {
+        fault_last = fault_str;
         ui->mcFaultLabel->setText(fault_str);
         if (isOk) {
             ui->mcFaultLabel->setStyleSheet("QLabel { background-color : lightgreen; color : black; }");
@@ -230,6 +230,11 @@ void CarInterface::setStateData(CAR_STATE data)
     } else {
         ui->clockLabel->setText("00:00:00:000");
     }
+
+#ifdef HAS_SBS
+    mSpeed = data.speed;
+#endif
+
 }
 
 void CarInterface::setMap(MapWidget *map)
@@ -984,3 +989,44 @@ void CarInterface::on_dwClearSamplesButton_clicked()
     mDwData.clear();
     plotDwData();
 }
+
+#ifdef HAS_SBS
+NmeaWidget* CarInterface::getNmeaWidget()
+{
+    return ui->nmeaWidget;
+}
+
+double CarInterface::getSpeed()
+{
+    return mSpeed;
+}
+
+void CarInterface::setUpdateRouteFromMap(bool enabled)
+{
+    ui->updateRouteFromMapBox->setChecked(enabled);
+}
+
+void CarInterface::setRPiClock()
+{
+    on_setClockPiButton_clicked();
+}
+
+void CarInterface::on_checkBox_toggled(bool checked)
+{
+    mPacketInterface->setLogEnabled(checked);
+}
+
+void CarInterface::on_pollBox_toggled(bool checked)
+{
+    mPacketInterface->setFirstPoll(checked);
+}
+#endif
+
+
+
+
+
+
+
+
+

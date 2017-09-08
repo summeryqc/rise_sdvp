@@ -22,6 +22,10 @@
 #include "mapwidget.h"
 #include "utility.h"
 
+#ifdef RELEASE_WIN
+#include <QTime>
+#endif
+
 namespace
 {
 static void normalizeAngleRad(double &angle)
@@ -339,20 +343,9 @@ QList<LocPoint> MapWidget::getRoute()
     return mRoutes[mRouteNow];
 }
 
-QList<QList<LocPoint> > MapWidget::getRoutes()
-{
-    return mRoutes;
-}
-
-void MapWidget::setRoute(const QList<LocPoint> &route)
+void MapWidget::setRoute(QList<LocPoint> route)
 {
     mRoutes[mRouteNow] = route;
-    update();
-}
-
-void MapWidget::addRoute(const QList<LocPoint> &route)
-{
-    mRoutes.append(route);
     update();
 }
 
@@ -951,17 +944,6 @@ void MapWidget::paintEvent(QPaintEvent *event)
                 rect_txt.setCoords(pt_txt.x(), pt_txt.y() - 20,
                                    pt_txt.x() + 150, pt_txt.y() + 25);
                 painter.drawText(rect_txt, txt);
-            } else {
-                txt.sprintf("%d", rn);
-                pt_txt.setX(p.x());
-                pt_txt.setY(p.y());
-                painter.setTransform(txtTrans);
-                pt_txt = drawTrans.map(pt_txt);
-                pen.setColor(Qt::black);
-                painter.setPen(pen);
-                rect_txt.setCoords(pt_txt.x() - 20, pt_txt.y() - 20,
-                                   pt_txt.x() + 20, pt_txt.y() + 20);
-                painter.drawText(rect_txt, Qt::AlignCenter, txt);
             }
         }
     }
@@ -1385,19 +1367,19 @@ void MapWidget::mouseReleaseEvent(QMouseEvent *e)
 
 void MapWidget::wheelEvent(QWheelEvent *e)
 {
-    if (e->modifiers() & Qt::ControlModifier && mSelectedCar >= 0) {
-        for (int i = 0;i < mCarInfo.size();i++) {
-            CarInfo &carInfo = mCarInfo[i];
-            if (carInfo.getId() == mSelectedCar) {
-                LocPoint pos = carInfo.getLocation();
-                double angle = pos.getYaw() + (double)e->delta() * 0.0005;
-                normalizeAngleRad(angle);
-                pos.setYaw(angle);
-                carInfo.setLocation(pos);
-                emit posSet(mSelectedCar, pos);
-                update();
+        if (e->modifiers() & Qt::ControlModifier && mSelectedCar >= 0) {
+            for (int i = 0;i < mCarInfo.size();i++) {
+                CarInfo &carInfo = mCarInfo[i];
+                if (carInfo.getId() == mSelectedCar) {
+                    LocPoint pos = carInfo.getLocation();
+                    double angle = pos.getYaw() + (double)e->delta() * 0.0005;
+                    normalizeAngleRad(angle);
+                    pos.setYaw(angle);
+                    carInfo.setLocation(pos);
+                    emit posSet(mSelectedCar, pos);
+                    update();
+                }
             }
-        }
 
         for (int i = 0;i < mCopterInfo.size();i++) {
             CopterInfo &copterInfo = mCopterInfo[i];
@@ -1730,3 +1712,21 @@ void MapWidget::getEnuRef(double *llh)
     llh[1] = mRefLon;
     llh[2] = mRefHeight;
 }
+
+#ifdef HAS_SBS
+void MapWidget::removeLastPoint()
+{
+    mRoutes[mRouteNow].removeLast();
+    update();
+}
+#endif
+
+
+
+
+
+
+
+
+
+

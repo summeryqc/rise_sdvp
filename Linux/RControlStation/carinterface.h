@@ -31,6 +31,10 @@
 #include "orientationwidget.h"
 #endif
 
+#ifdef HAS_SBS
+#include "nmeawidget.h"
+#endif
+
 namespace Ui {
 class CarInterface;
 }
@@ -55,6 +59,13 @@ public:
     void setCtrlAp();
     void setCtrlKb();
     bool setAp(bool on);
+
+#ifdef HAS_SBS
+    NmeaWidget* getNmeaWidget();
+    double getSpeed();
+    void setUpdateRouteFromMap(bool enabled);
+    void setRPiClock();    
+#endif 
 
 signals:
     void terminalCmd(quint8 id, QString cmd);
@@ -108,6 +119,11 @@ private slots:
     void on_dwAnch2GetButton_clicked();
     void on_dwClearSamplesButton_clicked();
 
+#ifdef HAS_SBS
+    void on_checkBox_toggled(bool checked);
+    void on_pollBox_toggled(bool checked);
+#endif
+
 private:
     Ui::CarInterface *ui;
     QVector<double> experimentDataX;
@@ -128,11 +144,14 @@ private:
     quint16 mUdpPort;
     TcpServerSimple *mTcpServer;
     bool mExperimentReplot;
-    QString mFaultLast;
 
     void getConfGui(MAIN_CONFIG &conf);
     void setConfGui(MAIN_CONFIG &conf);
     void plotDwData();
+
+#ifdef HAS_SBS
+    double mSpeed;
+#endif
 
 };
 
