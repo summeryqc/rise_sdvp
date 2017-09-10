@@ -25,6 +25,8 @@ unix:!macx {
 # OpenGL support
 DEFINES += HAS_OPENGL
 
+LIBS += -lopengl32 -lglu32
+
 TARGET = RControlStation
 TEMPLATE = app
 
