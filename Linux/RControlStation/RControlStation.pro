@@ -13,6 +13,24 @@ QT       += opengl
 
 CONFIG   += c++11
 
+# VCC iTransit Steer-By-Server SBS
+DEFINES += HAS_SBS
+
+
+
+contains(DEFINES, HAS_SBS) {
+    RC_ICONS += Car-96_white.ico
+    QT += gamepad
+    QT += qml quick widgets
+    HEADERS +=
+    SOURCES +=
+    CONFIG(release, debug|release):CONFIG += static
+}
+
+CONFIG(release, debug|release){
+win32: DEFINES += RELEASE_WIN
+}
+
 # Ubuntu
 # sudo apt-get install libassimp-dev
 #DEFINES += HAS_ASSIMP
