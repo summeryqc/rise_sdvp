@@ -631,6 +631,52 @@ void PacketInterface::processPacket(const unsigned char *data, int len)
         state.ap_goal_py = utility::buffer_get_double32(data, 1e4, &ind);
         state.ap_rad = utility::buffer_get_double32(data, 1e6, &ind);
         state.ms_today = utility::buffer_get_int32(data, &ind);
+#ifdef HAS_SBS
+        // Log car state
+        if (enableLog) {
+            QString carState;
+            QTime time;
+            ++sample;
+
+            if (mFirstPoll) {
+                mFirstPoll = false;
+                sample = 0;
+                carState = " - - - Poll started at " + time.currentTime().toString("hh:mm:ss.zzzzz") + " - - -";
+            }
+
+            carState += "\nsample:\t" + QString().number(sample) + "\n";
+            carState += "timestamp:\t" + time.currentTime().toString("hh:mm:ss.zzzzz") + "\n";
+            carState += "id:\t" + QString().number(id) + "\n";
+            carState += "roll:\t" + QString().number(state.roll) + "\n";
+            carState += "pitch:\t" + QString().number(state.pitch) + "\n";
+            carState += "yaw:\t" + QString().number(state.yaw) + "\n";
+            carState += "accel_0:\t" + QString().number(state.accel[0]) + "\n";
+            carState += "accel_1:\t" + QString().number(state.accel[1]) + "\n";
+            carState += "accel_2:\t" + QString().number(state.accel[2]) + "\n";
+            carState += "gyro_0:\t" + QString().number(state.gyro[0]) + "\n";
+            carState += "gyro_1:\t" + QString().number(state.gyro[1]) + "\n";
+            carState += "gyro_2:\t" + QString().number(state.gyro[2]) + "\n";
+            carState += "mag_0:\t" + QString().number(state.mag[0]) + "\n";
+            carState += "mag_1:\t" + QString().number(state.mag[1]) + "\n";
+            carState += "mag_2:\t" + QString().number(state.mag[2]) + "\n";
+            carState += "px:\t" + QString().number(state.px) + "\n";
+            carState += "py:\t" + QString().number(state.py) + "\n";
+            carState += "speed:\t" + QString().number(state.speed) + "\n";
+            carState += "vin:\t" + QString().number(state.vin) + "\n";
+            carState += "temp_fet:\t" + QString().number(state.temp_fet) + "\n";
+            carState += "mc_fault:\t" + QString().number(state.mc_fault) + "\n";
+            carState += "px_gps:\t" + QString().number(state.px_gps) + "\n";
+            carState += "py_gps:\t" + QString().number(state.py_gps) + "\n";
+            carState += "ap_goal_px:\t" + QString().number(state.ap_goal_px) + "\n";
+            carState += "ap_goal_py:\t" + QString().number(state.ap_goal_py) + "\n";
+            carState += "ap_rad:\t" + QString().number(state.ap_rad) + "\n";
+            carState += "ms_today:\t" + QString().number(state.ms_today) + "\n";
+
+            QTextStream outstream(outputFile);
+            outstream << carState;
+        }
+#endif
+
         emit stateReceived(id, state);
     } break;
 
@@ -1292,3 +1338,36 @@ void PacketInterface::mrOverridePower(quint8 id, double fl_f, double bl_l, doubl
     utility::buffer_append_double32_auto(mSendBuffer, br_b, &send_index);
     sendPacket(mSendBuffer, send_index);
 }
+
+#ifdef HAS_SBS
+void PacketInterface::setFirstPoll(bool checked)
+{
+    mFirstPoll = checked;
+}
+
+void PacketInterface::setLogEnabled(bool enable)
+{
+    enableLog = enable;
+
+    if (enableLog) {
+        // Create a log folder
+        QString folderPath = qApp->applicationDirPath() + "/Logs";
+
+        if (!QDir(folderPath).exists()) {
+            QDir().mkdir(folderPath);
+        }
+
+        // Create file path{
+        QDateTime qdateTime;
+        QString outputFilePath = folderPath + qdateTime.currentDateTime().toString("/yyyy_MM_dd_hh_mm_ss_") + "carStateLog.txt";
+
+        // Create and open log file
+        outputFile = new QFile(outputFilePath);
+        if (!outputFile->open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Append))
+        {
+            qDebug() << "Error - packetinterface.cpp, line 101\nCan not open file";
+        }
+    }
+}
+
+#endif
