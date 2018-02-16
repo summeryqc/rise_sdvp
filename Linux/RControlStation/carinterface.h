@@ -109,6 +109,11 @@ private slots:
     void on_dwAnch2GetButton_clicked();
     void on_dwClearSamplesButton_clicked();
 
+#ifdef HAS_SBS
+    void on_logBox_toggled(bool checked);
+    void on_pollBox_toggled(bool checked);
+#endif
+
 private:
     Ui::CarInterface *ui;
     QVector<double> experimentDataX;
