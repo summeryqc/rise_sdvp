@@ -25,6 +25,14 @@
 #include "datatypes.h"
 #include "locpoint.h"
 
+#ifdef HAS_SBS
+#include <QFile>
+#include <QDate>
+#include <QDateTime>
+#include <QDir>
+#include <QApplication>
+#endif
+
 class PacketInterface : public QObject
 {
     Q_OBJECT
@@ -117,6 +125,11 @@ public slots:
     void radarSetupGet(quint8 id);
     void mrRcControl(quint8 id, double throttle, double roll, double pitch, double yaw);
     void mrOverridePower(quint8 id, double fl_f, double bl_l, double fr_r, double br_b);
+#ifdef HAS_SBS
+    void setFirstPoll(bool checked);
+    void setLogEnabled(bool enable);
+#endif
+
 
 private:
     unsigned short crc16(const unsigned char *buf, unsigned int len);
@@ -142,6 +155,18 @@ private:
     unsigned int mRxDataPtr;
     unsigned char mCrcLow;
     unsigned char mCrcHigh;
+
+#ifdef HAS_SBS
+    int interval = 0;
+    bool doAvg = false;
+    bool once = true;
+    double yawSamples[500];
+    bool mFirstPoll;
+    bool enableLog = false;
+    QFile* outputFile;
+    ulong sample;
+    double ofs = 0;
+#endif
     
 };
 
