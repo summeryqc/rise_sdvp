@@ -30,6 +30,7 @@
 #include "ping.h"
 #include "nmeaserver.h"
 #include "rtcm3_simple.h"
+#include "intersectiontest.h"
 
 #ifdef HAS_JOYSTICK
 #include "joystick.h"
@@ -95,6 +96,7 @@ private slots:
     void on_mapAbsYawSlider_sliderReleased();
     void on_stopButton_clicked();
     void on_mapUploadRouteButton_clicked();
+    void on_mapGetRouteButton_clicked();
     void on_mapApButton_clicked();
     void on_mapKbButton_clicked();
     void on_mapOffButton_clicked();
@@ -136,6 +138,7 @@ private slots:
     void on_actionExit_triggered();
     void on_actionSaveRoutes_triggered();
     void on_actionLoadRoutes_triggered();
+    void on_actionTestIntersection_triggered();
 
 private:
     Ui::MainWindow *ui;
@@ -158,6 +161,7 @@ private:
     QTcpSocket *mTcpSocket;
     QString mVersion;
     rtcm3_state mRtcmState;
+    IntersectionTest *mIntersectionTest;
 
 #ifdef HAS_JOYSTICK
     Joystick *mJoystick;

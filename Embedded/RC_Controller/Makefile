@@ -156,7 +156,9 @@ CSRC = $(STARTUPSRC) \
        srf10.c \
        pwm_esc.c \
        mr_control.c \
-       actuator.c
+       actuator.c \
+       radar_cont.c \
+       motor_sim.c
 
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
@@ -267,6 +269,8 @@ endif
 build/$(PROJECT).bin: build/$(PROJECT).elf 
 	$(BIN) build/$(PROJECT).elf build/$(PROJECT).bin
 
+.PHONY: upload upload-olimex debug-start upload_remote
+
 # Program
 upload: build/$(PROJECT).bin
 	#qstlink2 --cli --erase --write build/$(PROJECT).bin
@@ -280,10 +284,8 @@ upload-olimex: build/$(PROJECT).bin
 debug-start:
 	openocd -f stm32-bv_openocd.cfg
 	
-upload_remote: build/$(PROJECT).elf
-	#./upload_remote build/$(PROJECT).elf elpgem 10.42.0.67 22
-	./upload_remote build/$(PROJECT).elf elpgem 10.130.200.112 22
-	#./upload_remote build/$(PROJECT).elf benjamin 192.168.1.155 22
+upload_remote: build/$(PROJECT).bin
+	./upload_remote build/$(PROJECT).bin elpgem 10.42.0.67 22 pi_gpio
 
 RULESPATH = $(CHIBIOS)/os/common/ports/ARMCMx/compilers/GCC
 include $(RULESPATH)/rules.mk

@@ -1,12 +1,17 @@
 #include "chronos.h"
+#include "utility.h"
+
 #include <QDebug>
 #include <cmath>
+#include <QDateTime>
 
 Chronos::Chronos(QObject *parent) : QObject(parent)
 {
     mPacket = 0;
     mTcpServer = new TcpServerSimple(this);
     mUdpSocket = new QUdpSocket(this);
+    mStartTimer = new QTimer(this);
+    mIsArmed = false;
 
     mUdpHostAddress = QHostAddress("0.0.0.0");
     mUdpPort = 0;
@@ -23,6 +28,8 @@ Chronos::Chronos(QObject *parent) : QObject(parent)
             this, SLOT(tcpConnectionChanged(bool)));
     connect(mUdpSocket, SIGNAL(readyRead()),
             this, SLOT(readPendingDatagrams()));
+    connect(mStartTimer, SIGNAL(timeout()),
+            this, SLOT(startTimerSlot()));
 }
 
 bool Chronos::startServer(PacketInterface *packet)
@@ -52,6 +59,15 @@ bool Chronos::startServer(PacketInterface *packet)
     }
 
     return res;
+}
+
+void Chronos::startTimerSlot()
+{
+    qDebug() << "Starting car";
+
+    if (mPacket) {
+        mPacket->setApActive(255, true);
+    }
 }
 
 void Chronos::tcpRx(QByteArray data)
@@ -105,6 +121,7 @@ void Chronos::tcpConnectionChanged(bool connected)
         qDebug() << "Chronos TCP connection accepted";
     } else {
         qDebug() << "Chronos TCP disconnected";
+        mIsArmed = false;
     }
 }
 
@@ -129,7 +146,34 @@ void Chronos::stateReceived(quint8 id, CAR_STATE state)
     (void)id;
     (void)state;
 
-    // TODO: Send monr message
+    chronos_monr monr;
+    double llh[3], xyz[3];
+
+    xyz[0] = state.px;
+    xyz[1] = state.py;
+    xyz[2] = 0.0;
+
+    utility::enuToLlh(mLlhRef, xyz, llh);
+
+    monr.lat = llh[0];
+    monr.lon = llh[1];
+    monr.alt = llh[2];
+    monr.direction = 0;
+    monr.speed = state.speed;
+    monr.ts = chronosTimeNow();
+    monr.status = state.speed > 0.2 ? 2 : 1;
+
+    monr.heading = state.yaw - 90.0;
+    while (monr.heading < 0) {
+        monr.heading += 360.0;
+    }
+    while (monr.heading > 360.0) {
+        monr.heading -= 360.0;
+    }
+
+//    qDebug() << fixed << qSetRealNumberPrecision(8) << monr.lat << monr.lon << monr.alt << mUdpPort;
+
+    sendMonr(monr);
 }
 
 bool Chronos::decodeMsg(quint8 type, quint32 len, QByteArray payload)
@@ -167,7 +211,7 @@ bool Chronos::decodeMsg(quint8 type, quint32 len, QByteArray payload)
 
                 if (sqrt((pt.x - pt_last.x) * (pt.x - pt_last.x) +
                          (pt.y - pt_last.y) * (pt.y - pt_last.y) +
-                         (pt.z - pt_last.z) * (pt.z - pt_last.z)) > 0.5) {
+                         (pt.z - pt_last.z) * (pt.z - pt_last.z)) > 1.0) {
                     path_redued.append(pt);
                 }
             }
@@ -211,6 +255,21 @@ bool Chronos::decodeMsg(quint8 type, quint32 len, QByteArray payload)
         processHeab(heab);
     } break;
 
+    case CHRONOS_MSG_SYPM: {
+        chronos_sypm sypm;
+        VByteArray vb(payload);
+        sypm.sync_point = vb.vbPopFrontUint32();
+        sypm.stop_time = vb.vbPopFrontUint32();
+        processSypm(sypm);
+    } break;
+
+    case CHRONOS_MSG_MTSP: {
+        chronos_mtsp mtsp;
+        VByteArray vb(payload);
+        mtsp.time_est = vb.vbPopFrontUint48();
+        processMtsp(mtsp);
+    } break;
+
     default:
         break;
     }
@@ -222,22 +281,30 @@ void Chronos::processDopm(QVector<chronos_dopm_pt> path)
 {
     qDebug() << "DOPM RX";
 
-    mPacket->clearRoute(255);
+    if (mIsArmed) {
+        qDebug() << "Ignored because car is armed";
+        return;
+    }
 
-    for (chronos_dopm_pt pt: path) {
-//        qDebug() << "-- Point" <<
-//                    "X:" << pt.x <<
-//                    "Y:" << pt.y <<
-//                    "Z:" << pt.z <<
-//                    "T:" << pt.tRel <<
-//                    "Speed:" << pt.speed * 3.6;
+    if (mPacket) {
+        mPacket->clearRoute(255);
 
-        if (mPacket) {
+        mRouteLast.clear();
+        for (chronos_dopm_pt pt: path) {
+            //        qDebug() << "-- Point" <<
+            //                    "X:" << pt.x <<
+            //                    "Y:" << pt.y <<
+            //                    "Z:" << pt.z <<
+            //                    "T:" << pt.tRel <<
+            //                    "Speed:" << pt.speed * 3.6;
+
             QList<LocPoint> points;
             LocPoint lpt;
             lpt.setXY(pt.x, pt.y);
             lpt.setSpeed(pt.speed);
+            lpt.setTime(pt.tRel);
             points.append(lpt);
+            mRouteLast.append(lpt);
 
             mPacket->setRoutePoints(255, points);
         }
@@ -248,31 +315,48 @@ void Chronos::processOsem(chronos_osem osem)
 {
     qDebug() << "OSEM RX";
 
-    double llh[3];
-    llh[0] = osem.lat;
-    llh[1] = osem.lon;
-    llh[2] = osem.alt;
+    if (mIsArmed) {
+        qDebug() << "Ignored because car is armed";
+        return;
+    }
+
+    mLlhRef[0] = osem.lat;
+    mLlhRef[1] = osem.lon;
+    mLlhRef[2] = osem.alt;
 
     // TODO: Rotate route with heading
 
     if (mPacket) {
-        mPacket->setEnuRef(255, llh);
+        mPacket->setEnuRef(255, mLlhRef);
     }
 }
 
 void Chronos::processOstm(chronos_ostm ostm)
 {
     qDebug() << "OSTM RX";
-    (void)ostm;
+    mIsArmed = ostm.armed == 1;
+    qDebug() << "Armed:" << mIsArmed;
 }
 
 void Chronos::processStrt(chronos_strt strt)
 {
     qDebug() << "STRT RX";
-    (void)strt;
 
-    if (mPacket) {
-        mPacket->setApActive(255, true);
+    if (!mIsArmed) {
+        qDebug() << "Ignored because car is not armed";
+        return;
+    }
+
+    quint64 cTime = chronosTimeNow();
+
+    qDebug() << strt.ts << cTime << ((int)strt.ts - (int)cTime);
+
+    if ((strt.ts <= cTime) || (strt.ts - cTime) < 10) {
+        startTimerSlot();
+    } else {
+        mStartTimer->setSingleShot(true);
+        mStartTimer->start(strt.ts - chronosTimeNow());
+        qDebug() << "Starting car in" << strt.ts - cTime << "ms";
     }
 }
 
@@ -295,6 +379,35 @@ void Chronos::processHeab(chronos_heab heab)
     }
 }
 
+void Chronos::processSypm(chronos_sypm sypm)
+{
+    qDebug() << "SYPM RX";
+    mSypmLast = sypm;
+}
+
+void Chronos::processMtsp(chronos_mtsp mtsp)
+{
+    qDebug() << "MTSP RX";
+    (void)mtsp;
+
+    // Find points
+    int closest_sync = 0;
+    for (int i = 0;i < mRouteLast.size();i++) {
+        if (fabs(mRouteLast.at(i).getTime() - mSypmLast.sync_point) <
+                fabs(mRouteLast.at(closest_sync).getTime() - mSypmLast.sync_point)) {
+            closest_sync = i;
+        }
+    }
+
+    if (mPacket) {
+        mPacket->setSyncPoint(255, closest_sync, mtsp.time_est - chronosTimeNow(),
+                              mSypmLast.sync_point - mSypmLast.stop_time);
+
+        qDebug() << closest_sync << mtsp.time_est - chronosTimeNow() <<
+                    mSypmLast.sync_point - mSypmLast.stop_time;
+    }
+}
+
 bool Chronos::sendMonr(chronos_monr monr)
 {
     if (QString::compare(mUdpHostAddress.toString(), "0.0.0.0") == 0) {
@@ -302,6 +415,8 @@ bool Chronos::sendMonr(chronos_monr monr)
     }
 
     VByteArray vb;
+    vb.vbAppendInt8(CHRONOS_MSG_MONR);
+    vb.vbAppendInt32(24);
     vb.vbAppendUint48(monr.ts);
     vb.vbAppendInt32((int32_t)(monr.lat * 1e7));
     vb.vbAppendInt32((int32_t)(monr.lon * 1e7));
@@ -314,4 +429,15 @@ bool Chronos::sendMonr(chronos_monr monr)
     mUdpSocket->writeDatagram(vb, mUdpHostAddress, mUdpPort);
 
     return true;
+}
+
+quint64 Chronos::chronosTimeNow()
+{
+    QDateTime date = QDateTime::currentDateTime();
+    return date.currentMSecsSinceEpoch() - 1072915200000 + 5000;
+}
+
+quint32 Chronos::chronosTimeToUtcToday(quint64 time)
+{
+    return (time % (24*60*60*1000)) - 5000;
 }

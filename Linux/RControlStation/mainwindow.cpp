@@ -91,6 +91,13 @@ MainWindow::MainWindow(QWidget *parent) :
     mUdpSocket = new QUdpSocket(this);
     mTcpSocket = new QTcpSocket(this);
 
+    mIntersectionTest = new IntersectionTest(this);
+    mIntersectionTest->setCars(&mCars);
+    mIntersectionTest->setMap(ui->mapWidget);
+    mIntersectionTest->setPacketInterface(mPacketInterface);
+    connect(ui->nComWidget, SIGNAL(dataRx(ncom_data)),
+            mIntersectionTest, SLOT(nComRx(ncom_data)));
+
     mKeyUp = false;
     mKeyDown = false;
     mKeyLeft = false;
@@ -100,8 +107,9 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->networkLoggerWidget->setMap(ui->mapWidget);
     ui->networkInterface->setMap(ui->mapWidget);
     ui->networkInterface->setPacketInterface(mPacketInterface);
+    ui->networkInterface->setCars(&mCars);
     ui->moteWidget->setPacketInterface(mPacketInterface);
-    ui->rtRangeWidget->setMap(ui->mapWidget);
+    ui->nComWidget->setMap(ui->mapWidget);
 
     connect(mTimer, SIGNAL(timeout()), this, SLOT(timerSlot()));
     connect(mSerialPort, SIGNAL(readyRead()),
@@ -573,6 +581,10 @@ void MainWindow::nmeaGgaRx(int fields, NmeaServer::nmea_gga_info_t gga)
 
             p.setInfo(info);
             ui->mapWidget->addInfoPoint(p);
+
+            if (ui->mapStreamNmeaFollowBox->isChecked()) {
+                ui->mapWidget->moveView(p.getX(), p.getY());
+            }
 
             // Optionally stream the data over UDP
             if (ui->mapStreamNmeaForwardUdpBox->isChecked()) {
@@ -1101,6 +1113,46 @@ void MainWindow::on_mapUploadRouteButton_clicked()
     ui->mapUploadRouteButton->setEnabled(true);
 }
 
+void MainWindow::on_mapGetRouteButton_clicked()
+{
+    if (!mSerialPort->isOpen() && !mPacketInterface->isUdpConnected() && !mTcpSocket->isOpen()) {
+        QMessageBox::warning(this, "Get route",
+                             "Serial port not connected.");
+        return;
+    }
+
+    ui->mapGetRouteButton->setEnabled(false);
+
+    QList<LocPoint> route;
+    int routeLen;
+    bool ok = mPacketInterface->getRoutePart(ui->mapCarBox->value(), route.size(), 10, route, routeLen);
+
+    while (route.size() < routeLen && ok) {
+        ok = mPacketInterface->getRoutePart(ui->mapCarBox->value(), route.size(), 10, route, routeLen);
+        ui->mapUploadRouteProgressBar->setValue((100 * route.size()) / routeLen);
+    }
+
+    while (route.size() > routeLen) {
+        route.removeLast();
+    }
+
+    ui->mapGetRouteButton->setEnabled(true);
+
+    if (ok) {
+        if (route.size() > 0) {
+            ui->mapWidget->addRoute(route);
+            ui->mapUploadRouteProgressBar->setValue(100);
+            showStatusInfo("GetRoute OK", true);
+        } else {
+            showStatusInfo("GetRoute OK, but route empty", true);
+        }
+    } else {
+        showStatusInfo("GetRoute failed", false);
+        QMessageBox::warning(this, "Get route",
+                             "Could not get route from car.");
+    }
+}
+
 void MainWindow::on_mapApButton_clicked()
 {
     for (int i = 0;i < mCars.size();i++) {
@@ -1482,16 +1534,18 @@ void MainWindow::on_actionSaveRoutes_triggered()
     QList<QList<LocPoint> > routes = ui->mapWidget->getRoutes();
 
     for (QList<LocPoint> route: routes) {
-        stream.writeStartElement("route");
-        for (LocPoint p: route) {
-            stream.writeStartElement("point");
-            stream.writeTextElement("x", QString::number(p.getX()));
-            stream.writeTextElement("y", QString::number(p.getY()));
-            stream.writeTextElement("speed", QString::number(p.getSpeed()));
-            stream.writeTextElement("time", QString::number(p.getTime()));
+        if (!route.isEmpty()) {
+            stream.writeStartElement("route");
+            for (LocPoint p: route) {
+                stream.writeStartElement("point");
+                stream.writeTextElement("x", QString::number(p.getX()));
+                stream.writeTextElement("y", QString::number(p.getY()));
+                stream.writeTextElement("speed", QString::number(p.getSpeed()));
+                stream.writeTextElement("time", QString::number(p.getTime()));
+                stream.writeEndElement();
+            }
             stream.writeEndElement();
         }
-        stream.writeEndElement();
     }
 
     stream.writeEndDocument();
@@ -1587,4 +1641,9 @@ void MainWindow::on_actionLoadRoutes_triggered()
                                   "routes tag not found in " + filename);
         }
     }
+}
+
+void MainWindow::on_actionTestIntersection_triggered()
+{
+    mIntersectionTest->show();
 }

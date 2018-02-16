@@ -36,6 +36,7 @@
 #include "comm_cc1120.h"
 #include "mr_control.h"
 #include "adconv.h"
+#include "motor_sim.h"
 
 #include <math.h>
 #include <string.h>
@@ -55,6 +56,7 @@ static bool m_init_done = false;
 // Private functions
 static void stop_forward(void *p);
 static void rtcm_rx(uint8_t *data, int len, int type);
+static void rtcm_base_rx(rtcm_ref_sta_pos_t *pos);
 
 // Private variables
 static rtcm3_state rtcm_state;
@@ -66,6 +68,7 @@ void commands_init(void) {
 
 	rtcm3_init_state(&rtcm_state);
 	rtcm3_set_rx_callback(rtcm_rx, &rtcm_state);
+	rtcm3_set_rx_callback_1005_1006(rtcm_base_rx, &rtcm_state);
 
 #if MAIN_MODE != MAIN_MODE_CAR
 	(void)stop_forward;
@@ -257,6 +260,33 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			commands_send_packet(m_send_buffer, send_index);
 		} break;
 
+		case CMD_AP_GET_ROUTE_PART: {
+			int32_t ind = 0;
+			int first = buffer_get_int32(data, &ind);
+			int num = data[ind++];
+
+			if (num > 20) {
+				break;
+			}
+
+			int32_t send_index = 0;
+			m_send_buffer[send_index++] = main_id;
+			m_send_buffer[send_index++] = CMD_AP_GET_ROUTE_PART;
+
+			int route_len = autopilot_get_route_len();
+			buffer_append_int32(m_send_buffer, route_len, &send_index);
+
+			for (int i = first;i < (first + num);i++) {
+				ROUTE_POINT rp = autopilot_get_route_point(i);
+				buffer_append_float32_auto(m_send_buffer, rp.px, &send_index);
+				buffer_append_float32_auto(m_send_buffer, rp.py, &send_index);
+				buffer_append_float32_auto(m_send_buffer, rp.speed, &send_index);
+				buffer_append_int32(m_send_buffer, rp.time, &send_index);
+			}
+
+			commands_send_packet(m_send_buffer, send_index);
+		} break;
+
 		case CMD_AP_SET_ACTIVE: {
 			timeout_reset();
 			commands_set_send_func(func);
@@ -300,17 +330,28 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			commands_send_packet(m_send_buffer, send_index);
 		} break;
 
-		case CMD_SEND_RTCM_USB: {
-#if UBLOX_EN
-			ublox_send(data, len);
-#else
+		case CMD_AP_SYNC_POINT: {
+			timeout_reset();
+			commands_set_send_func(func);
+
+			int32_t ind = 0;
+			int32_t point = buffer_get_int32(data, &ind);
+			int32_t time = buffer_get_int32(data, &ind);
+			int32_t min_diff = buffer_get_int32(data, &ind);
+
+			autopilot_sync_point(point, time, min_diff);
+
+			// Send ack
 			int32_t send_index = 0;
 			m_send_buffer[send_index++] = main_id;
 			m_send_buffer[send_index++] = packet_id;
-			memcpy(m_send_buffer + send_index, data, len);
-			send_index += len;
-			comm_usb_send_packet(m_send_buffer, send_index);
-#endif
+			commands_send_packet(m_send_buffer, send_index);
+		} break;
+
+		case CMD_SEND_RTCM_USB: {
+			for (unsigned int i = 0;i < len;i++) {
+				rtcm3_input_data(data[i], &rtcm_state);
+			}
 		} break;
 
 		case CMD_SEND_NMEA_RADIO: {
@@ -498,6 +539,7 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			main_config.gps_ant_y = buffer_get_float32_auto(data, &ind);
 			main_config.gps_comp = data[ind++];
 			main_config.gps_req_rtk = data[ind++];
+			main_config.gps_use_rtcm_base_as_enu_ref = data[ind++];
 			main_config.gps_corr_gain_stat = buffer_get_float32_auto(data, &ind);
 			main_config.gps_corr_gain_dyn = buffer_get_float32_auto(data, &ind);
 			main_config.gps_corr_gain_yaw = buffer_get_float32_auto(data, &ind);
@@ -511,17 +553,23 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			main_config.ap_max_speed = buffer_get_float32_auto(data, &ind);
 			main_config.ap_time_add_repeat_ms = buffer_get_int32(data, &ind);
 
+			main_config.log_rate_hz = buffer_get_int16(data, &ind);
 			main_config.log_en = data[ind++];
 			strcpy(main_config.log_name, (const char*)(data + ind));
 			ind += strlen(main_config.log_name) + 1;
+			main_config.log_en_uart = data[ind++];
+			main_config.log_uart_baud = buffer_get_uint32(data, &ind);
 
+			log_set_rate(main_config.log_rate_hz);
 			log_set_enabled(main_config.log_en);
 			log_set_name(main_config.log_name);
+			log_set_uart(main_config.log_en_uart, main_config.log_uart_baud);
 
 			// Car settings
 			main_config.car.yaw_use_odometry = data[ind++];
 			main_config.car.yaw_imu_gain = buffer_get_float32_auto(data, &ind);
 			main_config.car.disable_motor = data[ind++];
+			main_config.car.simulate_motor = data[ind++];
 
 			main_config.car.gear_ratio = buffer_get_float32_auto(data, &ind);
 			main_config.car.wheel_diam = buffer_get_float32_auto(data, &ind);
@@ -531,6 +579,10 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			main_config.car.steering_range = buffer_get_float32_auto(data, &ind);
 			main_config.car.steering_ramp_time = buffer_get_float32_auto(data, &ind);
 			main_config.car.axis_distance = buffer_get_float32_auto(data, &ind);
+
+#if MAIN_MODE == MAIN_MODE_CAR
+			motor_sim_set_running(main_config.car.simulate_motor);
+#endif
 
 			// Multirotor settings
 			main_config.mr.vel_decay_e = buffer_get_float32_auto(data, &ind);
@@ -638,6 +690,7 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.gps_ant_y, &send_index);
 			m_send_buffer[send_index++] = main_cfg_tmp.gps_comp;
 			m_send_buffer[send_index++] = main_cfg_tmp.gps_req_rtk;
+			m_send_buffer[send_index++] = main_cfg_tmp.gps_use_rtcm_base_as_enu_ref;
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.gps_corr_gain_stat, &send_index);
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.gps_corr_gain_dyn, &send_index);
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.gps_corr_gain_yaw, &send_index);
@@ -651,14 +704,18 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.ap_max_speed, &send_index);
 			buffer_append_int32(m_send_buffer, main_cfg_tmp.ap_time_add_repeat_ms, &send_index);
 
+			buffer_append_int16(m_send_buffer, main_cfg_tmp.log_rate_hz, &send_index);
 			m_send_buffer[send_index++] = main_cfg_tmp.log_en;
 			strcpy((char*)(m_send_buffer + send_index), main_cfg_tmp.log_name);
 			send_index += strlen(main_config.log_name) + 1;
+			m_send_buffer[send_index++] = main_cfg_tmp.log_en_uart;
+			buffer_append_uint32(m_send_buffer, main_cfg_tmp.log_uart_baud, &send_index);
 
 			// Car settings
 			m_send_buffer[send_index++] = main_cfg_tmp.car.yaw_use_odometry;
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.car.yaw_imu_gain, &send_index);
 			m_send_buffer[send_index++] = main_cfg_tmp.car.disable_motor;
+			m_send_buffer[send_index++] = main_cfg_tmp.car.simulate_motor;
 
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.car.gear_ratio, &send_index);
 			buffer_append_float32_auto(m_send_buffer, main_cfg_tmp.car.wheel_diam, &send_index);
@@ -1108,4 +1165,10 @@ static void rtcm_rx(uint8_t *data, int len, int type) {
 	send_index += len;
 	comm_usb_send_packet(m_send_buffer, send_index);
 #endif
+}
+
+static void rtcm_base_rx(rtcm_ref_sta_pos_t *pos) {
+	if (main_config.gps_use_rtcm_base_as_enu_ref) {
+		pos_set_enu_ref(pos->lat, pos->lon, pos->height);
+	}
 }

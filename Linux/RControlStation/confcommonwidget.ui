@@ -7,13 +7,28 @@
     <x>0</x>
     <y>0</y>
     <width>615</width>
-    <height>259</height>
+    <height>327</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>3</number>
+   </property>
+   <property name="leftMargin">
+    <number>3</number>
+   </property>
+   <property name="topMargin">
+    <number>3</number>
+   </property>
+   <property name="rightMargin">
+    <number>3</number>
+   </property>
+   <property name="bottomMargin">
+    <number>3</number>
+   </property>
    <item>
     <widget class="QTabWidget" name="tabWidget_2">
      <property name="sizePolicy">
@@ -43,6 +58,21 @@
        <string>IMU</string>
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_10">
+       <property name="spacing">
+        <number>3</number>
+       </property>
+       <property name="leftMargin">
+        <number>3</number>
+       </property>
+       <property name="topMargin">
+        <number>3</number>
+       </property>
+       <property name="rightMargin">
+        <number>3</number>
+       </property>
+       <property name="bottomMargin">
+        <number>3</number>
+       </property>
        <item>
         <layout class="QGridLayout" name="gridLayout_2">
          <item row="3" column="1">
@@ -346,9 +376,24 @@
        <string>GPS</string>
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_11">
+       <property name="spacing">
+        <number>3</number>
+       </property>
+       <property name="leftMargin">
+        <number>3</number>
+       </property>
+       <property name="topMargin">
+        <number>3</number>
+       </property>
+       <property name="rightMargin">
+        <number>3</number>
+       </property>
+       <property name="bottomMargin">
+        <number>3</number>
+       </property>
        <item>
         <layout class="QGridLayout" name="gridLayout_5">
-         <item row="2" column="2">
+         <item row="3" column="2">
           <widget class="QDoubleSpinBox" name="confGpsCorrDynBox">
            <property name="prefix">
             <string>Gain Dynamic: </string>
@@ -364,7 +409,7 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="1">
+         <item row="3" column="1">
           <widget class="QDoubleSpinBox" name="confGpsCorrStatBox">
            <property name="prefix">
             <string>Gain Static: </string>
@@ -380,7 +425,7 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="1">
+         <item row="4" column="1">
           <widget class="QDoubleSpinBox" name="confGpsCorrYawBox">
            <property name="prefix">
             <string>Gain Yaw: </string>
@@ -396,7 +441,7 @@
            </property>
           </widget>
          </item>
-         <item row="1" column="0">
+         <item row="2" column="0">
           <widget class="QLabel" name="label_6">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
@@ -409,7 +454,7 @@
            </property>
           </widget>
          </item>
-         <item row="1" column="1">
+         <item row="2" column="1">
           <widget class="QDoubleSpinBox" name="confGpsAntXBox">
            <property name="prefix">
             <string>Ant X: </string>
@@ -428,7 +473,7 @@
            </property>
           </widget>
          </item>
-         <item row="1" column="2">
+         <item row="2" column="2">
           <widget class="QDoubleSpinBox" name="confGpsAntYBox">
            <property name="prefix">
             <string>Ant Y: </string>
@@ -447,7 +492,7 @@
            </property>
           </widget>
          </item>
-         <item row="2" column="0">
+         <item row="3" column="0">
           <widget class="QLabel" name="label_7">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
@@ -460,7 +505,7 @@
            </property>
           </widget>
          </item>
-         <item row="3" column="0">
+         <item row="4" column="0">
           <widget class="QLabel" name="label_8">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
@@ -473,14 +518,14 @@
            </property>
           </widget>
          </item>
-         <item row="4" column="2">
+         <item row="5" column="2">
           <widget class="QCheckBox" name="confGpsUbxUseInfoBox">
            <property name="text">
             <string>Require Ublox Quality</string>
            </property>
           </widget>
          </item>
-         <item row="4" column="1">
+         <item row="5" column="1">
           <widget class="QCheckBox" name="confGpsReqRtkBox">
            <property name="text">
             <string>Require RTK Solution</string>
@@ -504,7 +549,7 @@
            </property>
           </widget>
          </item>
-         <item row="5" column="1" colspan="2">
+         <item row="6" column="1" colspan="2">
           <widget class="QDoubleSpinBox" name="confGpsUbxMaxAccBox">
            <property name="prefix">
             <string>Ublox Required Accuracy: </string>
@@ -533,7 +578,7 @@
            </property>
           </widget>
          </item>
-         <item row="4" column="0">
+         <item row="5" column="0">
           <widget class="QLabel" name="label_10">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
@@ -543,6 +588,16 @@
            </property>
            <property name="text">
             <string>Position Quality:</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0" colspan="3">
+          <widget class="QCheckBox" name="confGpsEnuRefBaseBox">
+           <property name="toolTip">
+            <string>Use base station position as ENU reference</string>
+           </property>
+           <property name="text">
+            <string>Use base station position as ENU origin</string>
            </property>
           </widget>
          </item>
@@ -574,20 +629,28 @@
       <attribute name="toolTip">
        <string>Autopilot</string>
       </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_13">
+      <layout class="QVBoxLayout" name="verticalLayout_3">
+       <property name="spacing">
+        <number>3</number>
+       </property>
+       <property name="leftMargin">
+        <number>3</number>
+       </property>
+       <property name="topMargin">
+        <number>3</number>
+       </property>
+       <property name="rightMargin">
+        <number>3</number>
+       </property>
+       <property name="bottomMargin">
+        <number>3</number>
+       </property>
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout_14">
          <item>
           <widget class="QCheckBox" name="confApRepeatBox">
            <property name="text">
             <string>Repeat Routes</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QCheckBox" name="confApModeTimeBox">
-           <property name="text">
-            <string>Time mode</string>
            </property>
           </widget>
          </item>
@@ -633,13 +696,58 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="groupBox">
+         <property name="title">
+          <string>Mode</string>
+         </property>
+         <layout class="QHBoxLayout" name="horizontalLayout">
+          <property name="leftMargin">
+           <number>3</number>
+          </property>
+          <property name="topMargin">
+           <number>3</number>
+          </property>
+          <property name="rightMargin">
+           <number>3</number>
+          </property>
+          <property name="bottomMargin">
+           <number>3</number>
+          </property>
+          <item>
+           <widget class="QRadioButton" name="confApModeSpeedButton">
+            <property name="text">
+             <string>Speed</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QRadioButton" name="confApModeTimeAbsButton">
+            <property name="text">
+             <string>Time Abs</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QRadioButton" name="confApModeTimeRelButton">
+            <property name="text">
+             <string>Time Rel</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="verticalSpacer_5">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
          </property>
          <property name="sizeHint" stdset="0">
           <size>
-           <width>0</width>
+           <width>20</width>
            <height>0</height>
           </size>
          </property>
@@ -658,25 +766,103 @@
       <attribute name="toolTip">
        <string>Logging</string>
       </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_14">
+      <layout class="QVBoxLayout" name="verticalLayout_2">
+       <property name="spacing">
+        <number>3</number>
+       </property>
+       <property name="leftMargin">
+        <number>3</number>
+       </property>
+       <property name="topMargin">
+        <number>3</number>
+       </property>
+       <property name="rightMargin">
+        <number>3</number>
+       </property>
+       <property name="bottomMargin">
+        <number>3</number>
+       </property>
        <item>
-        <widget class="QCheckBox" name="confLogEnBox">
-         <property name="text">
-          <string>Enable logging</string>
+        <layout class="QGridLayout" name="gridLayout">
+         <property name="spacing">
+          <number>3</number>
          </property>
-        </widget>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_11">
-         <item>
+         <item row="1" column="1" colspan="2">
+          <widget class="QLineEdit" name="confLogNameEdit"/>
+         </item>
+         <item row="1" column="0">
           <widget class="QLabel" name="label">
            <property name="text">
             <string>Log name</string>
            </property>
           </widget>
          </item>
-         <item>
-          <widget class="QLineEdit" name="confLogNameEdit"/>
+         <item row="3" column="0">
+          <widget class="QLabel" name="label_2">
+           <property name="text">
+            <string>UART baud rate</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1" colspan="2">
+          <widget class="QSpinBox" name="confLogRateBox">
+           <property name="suffix">
+            <string> Hz</string>
+           </property>
+           <property name="prefix">
+            <string>Rate: </string>
+           </property>
+           <property name="minimum">
+            <number>1</number>
+           </property>
+           <property name="maximum">
+            <number>500</number>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1" colspan="2">
+          <widget class="QSpinBox" name="confLogUartBaudBox">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="maximum">
+            <number>10000000</number>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="2">
+          <widget class="QRadioButton" name="confLogUartPolledButton">
+           <property name="text">
+            <string>Log Uart Polled</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QRadioButton" name="confLogUartOffButton">
+           <property name="text">
+            <string>Log Uart Off</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QRadioButton" name="confLogUartContButton">
+           <property name="text">
+            <string>Log Uart Cont</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QCheckBox" name="confLogEnBox">
+           <property name="text">
+            <string>Enable logging</string>
+           </property>
+          </widget>
          </item>
         </layout>
        </item>

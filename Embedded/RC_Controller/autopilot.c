@@ -24,12 +24,14 @@
 #include "utils.h"
 #include "pos.h"
 #include "bldc_interface.h"
+#include "commands.h"
+#include "terminal.h"
 
 // Defines
 #define AP_HZ						100 // Hz
 
 // Private variables
-static THD_WORKING_AREA(ap_thread_wa, 512);
+static THD_WORKING_AREA(ap_thread_wa, 2048);
 static ROUTE_POINT m_route[AP_ROUTE_SIZE];
 static bool m_is_active;
 static int m_point_last; // The last point on the route
@@ -42,6 +44,8 @@ static float m_rad_now;
 static ROUTE_POINT m_point_rx_prev;
 static bool m_point_rx_prev_set;
 static mutex_t m_ap_lock;
+static int32_t m_start_time;
+static bool m_sync_rx;
 
 // Private functions
 static THD_FUNCTION(ap_thread, arg);
@@ -55,6 +59,7 @@ static void steering_angle_to_point(
 		float *distance);
 static bool add_point(ROUTE_POINT *p, bool first);
 static void clear_route(void);
+static void terminal_state(int argc, const char **argv);
 
 void autopilot_init(void) {
 	memset(m_route, 0, sizeof(m_route));
@@ -69,6 +74,14 @@ void autopilot_init(void) {
 	memset(&m_point_rx_prev, 0, sizeof(ROUTE_POINT));
 	m_point_rx_prev_set = false;
 	chMtxObjectInit(&m_ap_lock);
+	m_start_time = 0;
+	m_sync_rx = false;
+
+	terminal_register_command_callback(
+			"ap_state",
+			"Print the state of the autopilot",
+			"",
+			terminal_state);
 
 	chThdCreateStatic(ap_thread_wa, sizeof(ap_thread_wa),
 			NORMALPRIO, ap_thread, NULL);
@@ -138,8 +151,88 @@ void autopilot_replace_route(ROUTE_POINT *p) {
 	chMtxUnlock(&m_ap_lock);
 }
 
+void autopilot_sync_point(int32_t point, int32_t time, int32_t min_time_diff) {
+	chMtxLock(&m_ap_lock);
+
+	if (!m_is_active) {
+		chMtxUnlock(&m_ap_lock);
+		return;
+	}
+
+	int start = m_point_now + 1;
+	if (start >= AP_ROUTE_SIZE) {
+		start = 0;
+	}
+
+	if (start == m_point_last) {
+		chMtxUnlock(&m_ap_lock);
+		return;
+	}
+
+	POS_STATE p;
+	pos_get_pos(&p);
+
+	// Car center
+	const float car_cx = p.px;
+	const float car_cy = p.py;
+	ROUTE_POINT car_pos;
+	car_pos.px = car_cx;
+	car_pos.py = car_cy;
+
+	int point_i = start;
+	int point_prev = 0;
+	float dist_tot = 0.0;
+
+	// Calculate remaining length
+	for (;;) {
+		if (point_i == start) {
+			dist_tot += utils_rp_distance(&car_pos, &m_route[point_i]);
+		} else {
+			dist_tot += utils_rp_distance(&m_route[point_prev], &m_route[point_i]);
+		}
+
+		if (point_i == (m_point_last - 1) || point_i == point) {
+			break;
+		}
+
+		point_prev = point_i;
+		point_i++;
+		if (point_i >= AP_ROUTE_SIZE) {
+			point_i = 0;
+		}
+	}
+
+	float speed = dist_tot / ((float)time / 1000.0);
+	utils_truncate_number_abs(&speed, main_config.ap_max_speed);
+
+	if (time < min_time_diff || dist_tot < main_config.ap_base_rad) {
+		m_sync_rx = false;
+		chMtxUnlock(&m_ap_lock);
+		return;
+	}
+
+	point_i = m_point_now;
+	while (point_i <= point && point_i != m_point_last) {
+		m_route[point_i].speed = speed;
+
+		point_i++;
+		if (point_i >= AP_ROUTE_SIZE) {
+			point_i = 0;
+		}
+	}
+
+	m_sync_rx = true;
+
+	chMtxUnlock(&m_ap_lock);
+}
+
 void autopilot_set_active(bool active) {
 	chMtxLock(&m_ap_lock);
+
+	if (active && !m_is_active) {
+		m_start_time = pos_get_ms_today();
+		m_sync_rx = false;
+	}
 
 	m_is_active = active;
 
@@ -148,6 +241,21 @@ void autopilot_set_active(bool active) {
 
 bool autopilot_is_active(void) {
 	return m_is_active;
+}
+
+int autopilot_get_route_len(void) {
+	return m_point_last;
+}
+
+ROUTE_POINT autopilot_get_route_point(int ind) {
+	ROUTE_POINT res;
+	memset(&res, 0, sizeof(ROUTE_POINT));
+
+	if (ind < m_point_last) {
+		res = m_route[ind];
+	}
+
+	return res;
 }
 
 /**
@@ -252,8 +360,8 @@ static THD_FUNCTION(ap_thread, arg) {
 			car_pos.px = car_cx;
 			car_pos.py = car_cy;
 
-			// Look 5 points ahead, or less than that if the route is shorter
-			int add = 5;
+			// Look 8 points ahead, or less than that if the route is shorter
+			int add = 8;
 			if (add > len) {
 				add = len;
 			}
@@ -438,7 +546,6 @@ static THD_FUNCTION(ap_thread, arg) {
 			if (!route_end) {
 				float distance, steering_angle;
 				float servo_pos;
-				static int max_steering = 0;
 
 				steering_angle_to_point(p.px, p.py, -p.yaw * M_PI / 180.0, rp_now.px,
 						rp_now.py, &steering_angle, &distance);
@@ -448,12 +555,8 @@ static THD_FUNCTION(ap_thread, arg) {
 
 				if (steering_angle >= max_rad) {
 					steering_angle = max_rad;
-					max_steering++;
 				} else if (steering_angle <= -max_rad) {
 					steering_angle = -max_rad;
-					max_steering++;
-				} else {
-					max_steering = 0;
 				}
 
 				servo_pos = steering_angle
@@ -463,7 +566,7 @@ static THD_FUNCTION(ap_thread, arg) {
 
 				float speed = 0.0;
 
-				if (main_config.ap_mode_time) {
+				if (main_config.ap_mode_time && !m_sync_rx) {
 					if (ms_today >= 0) {
 						// Calculate speed such that the route points are reached at their
 						// specified time. Notice that the direct distance between the car
@@ -477,6 +580,11 @@ static THD_FUNCTION(ap_thread, arg) {
 						float dist_car = utils_rp_distance(&car_pos, &rp_now);
 
 						int32_t t_diff = time - ms_today;
+
+						if (main_config.ap_mode_time == 2) {
+							t_diff += m_start_time;
+						}
+
 						if (t_diff < 0) {
 							t_diff += 24 * 60 * 60 * 1000;
 						}
@@ -598,4 +706,28 @@ static void clear_route(void) {
 	m_point_now = 0;
 	m_point_last = 0;
 	m_point_rx_prev_set = false;
+	m_start_time = pos_get_ms_today();
+	m_sync_rx = false;
+	memset(&m_rp_now, 0, sizeof(ROUTE_POINT));
+	memset(&m_point_rx_prev, 0, sizeof(ROUTE_POINT));
+}
+
+static void terminal_state(int argc, const char **argv) {
+	(void)argc;
+	(void)argv;
+
+	commands_printf(
+			"m_is_active: %i\n"
+			"m_has_prev_point: %i\n"
+			"m_point_now: %i\n"
+			"m_point_last: %i\n"
+			"m_point_rx_prev_set: %i\n"
+			"m_start_time: %i\n",
+
+			m_is_active,
+			m_has_prev_point,
+			m_point_now,
+			m_point_last,
+			m_point_rx_prev_set,
+			m_start_time);
 }

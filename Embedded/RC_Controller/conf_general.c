@@ -74,7 +74,7 @@ void conf_general_get_default_main_config(MAIN_CONFIG *conf) {
 	// Default settings
 	conf->mag_use = false;
 	conf->mag_comp = true;
-	conf->yaw_mag_gain = 0.01;
+	conf->yaw_mag_gain = 1.2;
 
 	conf->mag_cal_cx = 0.0;
 	conf->mag_cal_cy = 0.0;
@@ -93,6 +93,7 @@ void conf_general_get_default_main_config(MAIN_CONFIG *conf) {
 	conf->gps_ant_y = 0.0;
 	conf->gps_comp = true;
 	conf->gps_req_rtk = true;
+	conf->gps_use_rtcm_base_as_enu_ref = true;
 	conf->gps_corr_gain_stat = 0.05;
 	conf->gps_corr_gain_dyn = 0.05;
 	conf->gps_corr_gain_yaw = 1.0;
@@ -106,13 +107,17 @@ void conf_general_get_default_main_config(MAIN_CONFIG *conf) {
 	conf->ap_max_speed = 30.0 / 3.6;
 	conf->ap_time_add_repeat_ms = 60 * 1000;
 
+	conf->log_rate_hz = 50;
 	conf->log_en = false;
 	strcpy(conf->log_name, "New Log");
+	conf->log_en_uart = 0;
+	conf->log_uart_baud = 115200;
 
 	// Default car settings
 	conf->car.yaw_use_odometry = false;
 	conf->car.yaw_imu_gain = 0.5;
 	conf->car.disable_motor = false;
+	conf->car.simulate_motor = false;
 
 	conf->car.gear_ratio = (1.0 / 3.0) * (21.0 / 37.0);
 	conf->car.wheel_diam = 0.12;
@@ -182,43 +187,9 @@ void conf_general_get_default_main_config(MAIN_CONFIG *conf) {
 
 	// Custom parameters based on ID
 	switch (main_id) {
-	case 0:
-		conf->mag_cal_cx = -8.1581;
-		conf->mag_cal_cy = -2.6050;
-		conf->mag_cal_cz = -7.9479;
-
-		conf->mag_cal_xx = 0.8347;
-		conf->mag_cal_xy = -0.0196;
-		conf->mag_cal_xz = -0.0032;
-
-		conf->mag_cal_yx = -0.0196;
-		conf->mag_cal_yy = 0.8487;
-		conf->mag_cal_yz = 0.0106;
-
-		conf->mag_cal_zx = -0.0032;
-		conf->mag_cal_zy = 0.0106;
-		conf->mag_cal_zz = 0.9991;
-
+	case 1:
 		conf->car.steering_center = 0.53;
 		conf->gps_ant_x = 0.42;
-		break;
-
-	case 1:
-		conf->mag_cal_cx = -10.4112;
-		conf->mag_cal_cy = -20.6265;
-		conf->mag_cal_cz = -43.6944;
-
-		conf->mag_cal_xx = 0.773509;
-		conf->mag_cal_xy = -0.0942106;
-		conf->mag_cal_xz = -0.0015655;
-
-		conf->mag_cal_yx = -0.0942106;
-		conf->mag_cal_yy = 0.807739;
-		conf->mag_cal_yz = 0.0164993;
-
-		conf->mag_cal_zx = -0.0015655;
-		conf->mag_cal_zy = 0.0164993;
-		conf->mag_cal_zz = 0.998068;
 		break;
 
 	default:

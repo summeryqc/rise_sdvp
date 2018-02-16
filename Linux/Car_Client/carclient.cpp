@@ -53,6 +53,7 @@ CarClient::CarClient(QObject *parent) : QObject(parent)
     mUblox = new Ublox(this);
     mTcpSocket = new QTcpSocket(this);
     mTcpServer = new TcpServerSimple(this);
+    mRtcmClient = new RtcmClient(this);
     mCarId = 255;
     mReconnectTimer = new QTimer(this);
     mReconnectTimer->start(2000);
@@ -64,6 +65,11 @@ CarClient::CarClient(QObject *parent) : QObject(parent)
     mHostAddress = QHostAddress("0.0.0.0");
     mUdpPort = 0;
     mUdpSocket = new QUdpSocket(this);
+
+    mRtcmBaseLat = 0.0;
+    mRtcmBaseLon = 0.0;
+    mRtcmBaseHeight = 0.0;
+    mRtcmSendBase = false;
 
     currentMsgHandler = this;
     rtcm3_init_state(&rtcmState);
@@ -104,6 +110,8 @@ CarClient::CarClient(QObject *parent) : QObject(parent)
     connect(mUblox, SIGNAL(rxRawx(ubx_rxm_rawx)), this, SLOT(rxRawx(ubx_rxm_rawx)));
     connect(mTcpServer->packet(), SIGNAL(packetReceived(QByteArray&)),
             this, SLOT(tcpRx(QByteArray&)));
+    connect(mRtcmClient, SIGNAL(rtcmReceived(QByteArray,int,bool)),
+            this, SLOT(rtcmReceived(QByteArray,int,bool)));
 }
 
 CarClient::~CarClient()
@@ -278,6 +286,27 @@ void CarClient::restartRtklib()
         nav5.apply_dyn = true;
         nav5.dyn_model = 4;
         mUblox->ubxCfgNav5(&nav5);
+
+        // Time pulse configuration
+        ubx_cfg_tp5 tp5;
+        memset(&tp5, 0, sizeof(ubx_cfg_tp5));
+        tp5.active = true;
+        tp5.polarity = true;
+        tp5.alignToTow = true;
+        tp5.lockGnssFreq = true;
+        tp5.lockedOtherSet = true;
+        tp5.syncMode = false;
+        tp5.isFreq = false;
+        tp5.isLength = true;
+        tp5.freq_period = 1000000;
+        tp5.pulse_len_ratio = 0;
+        tp5.freq_period_lock = 1000000;
+        tp5.pulse_len_ratio_lock = 100000;
+        tp5.gridUtcGnss = 0;
+        tp5.user_config_delay = 0;
+        tp5.rf_group_delay = 0;
+        tp5.ant_cable_delay = 50;
+        mUblox->ubloxCfgTp5(&tp5);
     }
 
     QString user = qgetenv("USER");
@@ -326,6 +355,19 @@ bool CarClient::isRtklibRunning()
 quint8 CarClient::carId()
 {
     return mCarId;
+}
+
+void CarClient::connectNtrip(QString server, QString stream, QString user, QString pass, int port)
+{
+    mRtcmClient->connectNtrip(server, stream, user, pass, port);
+}
+
+void CarClient::setSendRtcmBasePos(bool send, double lat, double lon, double height)
+{
+    mRtcmSendBase = send;
+    mRtcmBaseLat = lat;
+    mRtcmBaseLon = lon;
+    mRtcmBaseHeight = height;
 }
 
 void CarClient::serialDataAvailable()
@@ -443,6 +485,13 @@ void CarClient::reconnectTimerSlot()
     if (mSettings.nmeaConnect && !mTcpConnected) {
         qDebug() << "Trying to reconnect nmea tcp...";
         connectNmea(mSettings.nmeaServer, mSettings.nmeaPort);
+    }
+
+    if ((mRtcmClient->isTcpConnected() || mRtcmClient->isSerialConnected()) && mRtcmSendBase) {
+        mPacketInterface->sendRtcmUsb(255, mRtcmClient->encodeBasePos(mRtcmBaseLat,
+                                                                      mRtcmBaseLon,
+                                                                      mRtcmBaseHeight,
+                                                                      0.0));
     }
 }
 
@@ -566,6 +615,13 @@ void CarClient::rxRawx(ubx_rxm_rawx rawx)
 void CarClient::tcpRx(QByteArray &data)
 {
     mPacketInterface->sendPacket(data);
+}
+
+void CarClient::rtcmReceived(QByteArray data, int type, bool sync)
+{
+    (void)type;
+    (void)sync;
+    mPacketInterface->sendRtcmUsb(255, data);
 }
 
 void CarClient::rebootSystem(bool powerOff)

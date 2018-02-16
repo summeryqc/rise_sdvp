@@ -1258,6 +1258,38 @@
                    <number>4</number>
                   </property>
                   <item>
+                   <layout class="QHBoxLayout" name="horizontalLayout_5">
+                    <item>
+                     <widget class="QPushButton" name="mapEditHelpButton">
+                      <property name="toolTip">
+                       <string>Show keyboard shortcuts</string>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="resources.qrc">
+                        <normaloff>:/models/Icons/Help-96.png</normaloff>:/models/Icons/Help-96.png</iconset>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="mapRemoveRouteButton">
+                      <property name="toolTip">
+                       <string>Delete current route</string>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="resources.qrc">
+                        <normaloff>:/models/Icons/Delete2-96.png</normaloff>:/models/Icons/Delete2-96.png</iconset>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </item>
+                  <item>
                    <widget class="QGroupBox" name="groupBox_9">
                     <property name="title">
                      <string>Current Route Point</string>
@@ -1355,6 +1387,71 @@
                          <minute>0</minute>
                          <second>2</second>
                         </time>
+                       </property>
+                      </widget>
+                     </item>
+                    </layout>
+                   </widget>
+                  </item>
+                  <item>
+                   <widget class="QGroupBox" name="groupBox_6">
+                    <property name="title">
+                     <string>Upload Current Route</string>
+                    </property>
+                    <layout class="QHBoxLayout" name="horizontalLayout_9">
+                     <property name="spacing">
+                      <number>2</number>
+                     </property>
+                     <property name="leftMargin">
+                      <number>4</number>
+                     </property>
+                     <property name="topMargin">
+                      <number>4</number>
+                     </property>
+                     <property name="rightMargin">
+                      <number>4</number>
+                     </property>
+                     <property name="bottomMargin">
+                      <number>4</number>
+                     </property>
+                     <item>
+                      <widget class="QPushButton" name="mapGetRouteButton">
+                       <property name="toolTip">
+                        <string>Read route from car</string>
+                       </property>
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="icon">
+                        <iconset resource="resources.qrc">
+                         <normaloff>:/models/Icons/Upload-96.png</normaloff>:/models/Icons/Upload-96.png</iconset>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QProgressBar" name="mapUploadRouteProgressBar">
+                       <property name="value">
+                        <number>0</number>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QPushButton" name="mapUploadRouteButton">
+                       <property name="sizePolicy">
+                        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                         <horstretch>0</horstretch>
+                         <verstretch>0</verstretch>
+                        </sizepolicy>
+                       </property>
+                       <property name="toolTip">
+                        <string>Write route to car</string>
+                       </property>
+                       <property name="text">
+                        <string/>
+                       </property>
+                       <property name="icon">
+                        <iconset resource="resources.qrc">
+                         <normaloff>:/models/Icons/Download-96.png</normaloff>:/models/Icons/Download-96.png</iconset>
                        </property>
                       </widget>
                      </item>
@@ -1527,86 +1624,6 @@
                    </widget>
                   </item>
                   <item>
-                   <widget class="QGroupBox" name="groupBox_6">
-                    <property name="title">
-                     <string>Upload Current Route</string>
-                    </property>
-                    <layout class="QHBoxLayout" name="horizontalLayout_9">
-                     <property name="spacing">
-                      <number>2</number>
-                     </property>
-                     <property name="leftMargin">
-                      <number>4</number>
-                     </property>
-                     <property name="topMargin">
-                      <number>4</number>
-                     </property>
-                     <property name="rightMargin">
-                      <number>4</number>
-                     </property>
-                     <property name="bottomMargin">
-                      <number>4</number>
-                     </property>
-                     <item>
-                      <widget class="QProgressBar" name="mapUploadRouteProgressBar">
-                       <property name="value">
-                        <number>0</number>
-                       </property>
-                      </widget>
-                     </item>
-                     <item>
-                      <widget class="QPushButton" name="mapUploadRouteButton">
-                       <property name="sizePolicy">
-                        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-                         <horstretch>0</horstretch>
-                         <verstretch>0</verstretch>
-                        </sizepolicy>
-                       </property>
-                       <property name="toolTip">
-                        <string>Write route to car</string>
-                       </property>
-                       <property name="text">
-                        <string/>
-                       </property>
-                       <property name="icon">
-                        <iconset resource="resources.qrc">
-                         <normaloff>:/models/Icons/Download-96.png</normaloff>:/models/Icons/Download-96.png</iconset>
-                       </property>
-                      </widget>
-                     </item>
-                    </layout>
-                   </widget>
-                  </item>
-                  <item>
-                   <layout class="QHBoxLayout" name="horizontalLayout_5">
-                    <item>
-                     <widget class="QPushButton" name="mapEditHelpButton">
-                      <property name="toolTip">
-                       <string>Show keyboard shortcuts</string>
-                      </property>
-                      <property name="text">
-                       <string/>
-                      </property>
-                      <property name="icon">
-                       <iconset resource="resources.qrc">
-                        <normaloff>:/models/Icons/Help-96.png</normaloff>:/models/Icons/Help-96.png</iconset>
-                      </property>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="mapRemoveRouteButton">
-                      <property name="text">
-                       <string/>
-                      </property>
-                      <property name="icon">
-                       <iconset resource="resources.qrc">
-                        <normaloff>:/models/Icons/Delete2-96.png</normaloff>:/models/Icons/Delete2-96.png</iconset>
-                      </property>
-                     </widget>
-                    </item>
-                   </layout>
-                  </item>
-                  <item>
                    <spacer name="verticalSpacer_4">
                     <property name="orientation">
                      <enum>Qt::Vertical</enum>
@@ -1663,7 +1680,7 @@
                    <x>0</x>
                    <y>0</y>
                    <width>196</width>
-                   <height>446</height>
+                   <height>436</height>
                   </rect>
                  </property>
                  <layout class="QVBoxLayout" name="verticalLayout_12">
@@ -1753,6 +1770,21 @@
                      <string>Stream NMEA over TCP</string>
                     </property>
                     <layout class="QVBoxLayout" name="verticalLayout_9">
+                     <property name="spacing">
+                      <number>3</number>
+                     </property>
+                     <property name="leftMargin">
+                      <number>3</number>
+                     </property>
+                     <property name="topMargin">
+                      <number>3</number>
+                     </property>
+                     <property name="rightMargin">
+                      <number>3</number>
+                     </property>
+                     <property name="bottomMargin">
+                      <number>3</number>
+                     </property>
                      <item>
                       <widget class="QLineEdit" name="mapStreamNmeaServerEdit">
                        <property name="text">
@@ -1790,6 +1822,13 @@
                       <widget class="QCheckBox" name="mapStreamNmeaRtkOnlyBox">
                        <property name="text">
                         <string>RTK only</string>
+                       </property>
+                      </widget>
+                     </item>
+                     <item>
+                      <widget class="QCheckBox" name="mapStreamNmeaFollowBox">
+                       <property name="text">
+                        <string>Follow</string>
                        </property>
                       </widget>
                      </item>
@@ -2447,11 +2486,11 @@
         <string/>
        </attribute>
        <attribute name="toolTip">
-        <string>RT Range</string>
+        <string>NCom Client</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_20">
         <item>
-         <widget class="RtRange" name="rtRangeWidget" native="true"/>
+         <widget class="NCom" name="nComWidget" native="true"/>
         </item>
        </layout>
       </widget>
@@ -2484,7 +2523,14 @@
     <addaction name="actionLoadRoutes"/>
     <addaction name="actionExit"/>
    </widget>
+   <widget class="QMenu" name="menuTests">
+    <property name="title">
+     <string>Tests</string>
+    </property>
+    <addaction name="actionTestIntersection"/>
+   </widget>
    <addaction name="menuFile"/>
+   <addaction name="menuTests"/>
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
@@ -2542,6 +2588,18 @@
     <string>Load Routes...</string>
    </property>
   </action>
+  <action name="actionTestIntersection">
+   <property name="icon">
+    <iconset resource="resources.qrc">
+     <normaloff>:/models/Icons/Streets-100.png</normaloff>:/models/Icons/Streets-100.png</iconset>
+   </property>
+   <property name="text">
+    <string>Intersection</string>
+   </property>
+   <property name="toolTip">
+    <string>Intersection Test</string>
+   </property>
+  </action>
  </widget>
  <layoutdefault spacing="6" margin="11"/>
  <customwidgets>
@@ -2582,9 +2640,9 @@
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>RtRange</class>
+   <class>NCom</class>
    <extends>QWidget</extends>
-   <header>rtrange.h</header>
+   <header>ncom.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

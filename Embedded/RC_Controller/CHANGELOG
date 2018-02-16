@@ -1,3 +1,49 @@
+=== FW 8.17 ===
+* Use gps_use_rtcm_base_as_enu_ref setting.
+* Relative time AP fix.
+
+=== FW 8.16 ===
+* More magnetometer yaw estimation fixes.
+
+=== FW 8.15 ===
+* General board yaw rotation support.
+* Always send raw magnetometer values.
+* Magnetometer yaw estimation fixes.
+
+=== FW 8.14 ===
+* Increased autopilot stack size.
+* Reverted yaw correction.
+
+=== FW 8.13 ===
+* Motor simulation support.
+
+=== FW 8.12 ===
+* MPU9250 support.
+* Larger stack for polled UART logging.
+* Lower 433 MHz speed for longer range.
+* Added terminal command to zero gyro bias.
+
+=== FW 8.11 ===
+* Added polled UART logging support.
+
+=== FW 8.10 ===
+* Ublox timepulse configuration support.
+
+=== FW 8.9 ===
+* PPS support and NMEA delay compensation.
+
+=== FW 8.8 ===
+* Added AP relative time mode.
+* Implemented CMD_AP_SYNC_POINT.
+
+=== FW 8.7 ===
+* Added UART log output.
+* Added configurable log rate.
+* Added option to use RTCM base station position as ENU reference.
+
+=== FW 8.6 ===
+* Added support to read routes.
+
 === FW 8.5 ===
 * Start of multirotor support.
  - Configuration parameters.

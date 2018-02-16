@@ -63,6 +63,7 @@ CarInterface::CarInterface(QWidget *parent) :
     mPacketInterface = 0;
     mId = 0;
     mExperimentReplot = false;
+    settingsReadDone = false;
 
     mTimer = new QTimer(this);
     mTimer->start(20);
@@ -367,6 +368,11 @@ bool CarInterface::setAp(bool on)
     return ok;
 }
 
+void CarInterface::disableKbBox()
+{
+    ui->keyboardControlBox->setChecked(false);
+}
+
 void CarInterface::timerSlot()
 {   
     if (mExperimentReplot) {
@@ -457,6 +463,7 @@ void CarInterface::nmeaReceived(quint8 id, QByteArray nmea_msg)
 void CarInterface::configurationReceived(quint8 id, MAIN_CONFIG config)
 {
     if (id == mId) {
+        settingsReadDone = true;
         setConfGui(config);
         QString str;
         str.sprintf("Car %d: Configuration Received", id);
@@ -761,6 +768,13 @@ void CarInterface::on_confReadDefaultButton_clicked()
 
 void CarInterface::on_confWriteButton_clicked()
 {
+    if (!settingsReadDone) {
+        QMessageBox::warning(this, "Configuration",
+                             "You must read the configuration at least once before writing it. "
+                             "Otherwise everything would be set to 0.");
+        return;
+    }
+
     if (mPacketInterface) {
         MAIN_CONFIG conf;
         getConfGui(conf);
@@ -780,6 +794,7 @@ void CarInterface::getConfGui(MAIN_CONFIG &conf)
     conf.car.yaw_use_odometry = ui->confOdometryYawBox->isChecked();
     conf.car.yaw_imu_gain = ui->confYawImuGainBox->value();
     conf.car.disable_motor = ui->confMiscDisableMotorBox->isChecked();
+    conf.car.simulate_motor = ui->confMiscSimulateMotorBox->isChecked();
 
     conf.car.gear_ratio = ui->confGearRatioBox->value();
     conf.car.wheel_diam = ui->confWheelDiamBox->value();
@@ -799,6 +814,7 @@ void CarInterface::setConfGui(MAIN_CONFIG &conf)
     ui->confOdometryYawBox->setChecked(conf.car.yaw_use_odometry);
     ui->confYawImuGainBox->setValue(conf.car.yaw_imu_gain);
     ui->confMiscDisableMotorBox->setChecked(conf.car.disable_motor);
+    ui->confMiscSimulateMotorBox->setChecked(conf.car.simulate_motor);
 
     ui->confGearRatioBox->setValue(conf.car.gear_ratio);
     ui->confWheelDiamBox->setValue(conf.car.wheel_diam);

@@ -174,9 +174,14 @@ MapWidget::MapWidget(QWidget *parent) : QWidget(parent)
     mInfoTraces.append(l);
 
     // Set this to the SP base station position for now
-    mRefLat = 57.71495867;
-    mRefLon = 12.89134921;
-    mRefHeight = 219.0;
+//    mRefLat = 57.71495867;
+//    mRefLon = 12.89134921;
+//    mRefHeight = 219.0;
+
+    // ASTA
+    mRefLat = 57.78100308;
+    mRefLon = 12.76925422;
+    mRefHeight = 253.76;
 
     // Home
     //    mRefLat = 57.57848470;
@@ -196,6 +201,38 @@ MapWidget::MapWidget(QWidget *parent) : QWidget(parent)
             this, SLOT(errorGetTile(QString)));
 
     setMouseTracking(true);
+
+    // Pre-render some things for speed
+    for (int i = 0;i < 2;i++) {
+        QPixmap pix(24, 24);
+        pix.fill(Qt::transparent);
+        QPainter *p = new QPainter(&pix);
+
+        QPen pen;
+        pen.setWidth(4);
+
+        switch (i) {
+        case 0: {
+            // Circle
+            pen.setColor(Qt::darkYellow);
+            p->setBrush(Qt::yellow);
+            p->setPen(pen);
+            p->drawEllipse(2, 2, 20, 20);
+        } break;
+
+        case 1: {
+            // Inactive circle
+            pen.setColor(Qt::darkGray);
+            p->setBrush(Qt::gray);
+            p->setPen(pen);
+            p->drawEllipse(2, 2, 20, 20);
+        } break;
+
+        }
+
+        delete p;
+        mPixmaps.append(pix);
+    }
 }
 
 CarInfo *MapWidget::getCarInfo(int car)
@@ -317,6 +354,15 @@ void MapWidget::setYOffset(double offset)
     update();
 }
 
+void MapWidget::moveView(double px, double py)
+{
+    LocPoint followLoc;
+    followLoc.setXY(px, py);
+    mXOffset = -followLoc.getX() * 1000.0 * mScaleFactor;
+    mYOffset = -followLoc.getY() * 1000.0 * mScaleFactor;
+    update();
+}
+
 void MapWidget::clearTrace()
 {
     mCarTrace.clear();
@@ -334,9 +380,18 @@ void MapWidget::addRoutePoint(double px, double py, double speed, qint32 time)
     update();
 }
 
-QList<LocPoint> MapWidget::getRoute()
+QList<LocPoint> MapWidget::getRoute(int ind)
 {
-    return mRoutes[mRouteNow];
+    if (ind < 0) {
+        return mRoutes[mRouteNow];
+    } else {
+        if (mRoutes.size() > ind) {
+            return mRoutes[ind];
+        } else {
+            QList<LocPoint> tmp;
+            return tmp;
+        }
+    }
 }
 
 QList<QList<LocPoint> > MapWidget::getRoutes()
@@ -352,6 +407,12 @@ void MapWidget::setRoute(const QList<LocPoint> &route)
 
 void MapWidget::addRoute(const QList<LocPoint> &route)
 {
+    while (!mRoutes.isEmpty() &&
+           mRoutes.last().isEmpty() &&
+           mRouteNow < mRoutes.size()) {
+        mRoutes.removeLast();
+    }
+
     mRoutes.append(route);
     update();
 }
@@ -376,10 +437,13 @@ void MapWidget::setRoutePointSpeed(double speed)
     mRoutePointSpeed = speed;
 }
 
-void MapWidget::addInfoPoint(LocPoint &info)
+void MapWidget::addInfoPoint(LocPoint &info, bool updateMap)
 {
     mInfoTraces[mInfoTraceNow].append(info);
-    update();
+
+    if (updateMap) {
+        update();
+    }
 }
 
 void MapWidget::clearInfoTrace()
@@ -932,13 +996,15 @@ void MapWidget::paintEvent(QPaintEvent *event)
             painter.setTransform(drawTrans);
             pen.setColor(Qt::darkYellow);
             painter.setPen(pen);
-            painter.drawEllipse(p, 10 / mScaleFactor, 10 / mScaleFactor);
+            drawCircleFast(painter, p, 10.0 / mScaleFactor, mRouteNow == rn ? 0 : 1);
 
             // Draw text only for selected route
             if (mRouteNow == rn) {
                 QTime t = QTime::fromMSecsSinceStartOfDay(routeNow[i].getTime());
-                txt.sprintf("%.1f km/h\n"
+                txt.sprintf("P: %d\n"
+                            "%.1f km/h\n"
                             "%02d:%02d:%02d:%03d",
+                            i,
                             routeNow[i].getSpeed() * 3.6,
                             t.hour(), t.minute(), t.second(), t.msec());
 
@@ -1185,6 +1251,7 @@ void MapWidget::paintEvent(QPaintEvent *event)
 
     double start_txt = 30.0;
     const double txt_row_h = 20.0;
+    const double txtOffset = 145.0;
 
     painter.setTransform(txtTrans);
     font.setPointSize(10);
@@ -1200,32 +1267,32 @@ void MapWidget::paintEvent(QPaintEvent *event)
         } else {
             txt.sprintf("Grid res: %.0f cm", res * 100.0);
         }
-        painter.drawText(width() - 140.0, start_txt, txt);
+        painter.drawText(width() - txtOffset, start_txt, txt);
         start_txt += txt_row_h;
     }
 
     // Draw zoom level
     txt.sprintf("Zoom: %.7f", mScaleFactor);
-    painter.drawText(width() - 140.0, start_txt, txt);
+    painter.drawText(width() - txtOffset, start_txt, txt);
     start_txt += txt_row_h;
 
     // Draw OSM zoom level
     if (mDrawOpenStreetmap) {
         txt.sprintf("OSM zoom: %d", mOsmZoomLevel);
-        painter.drawText(width() - 140.0, start_txt, txt);
+        painter.drawText(width() - txtOffset, start_txt, txt);
         start_txt += txt_row_h;
 
         if (mDrawOsmStats) {
             txt.sprintf("DL Tiles: %d", mOsm->getTilesDownloaded());
-            painter.drawText(width() - 140.0, start_txt, txt);
+            painter.drawText(width() - txtOffset, start_txt, txt);
             start_txt += txt_row_h;
 
             txt.sprintf("HDD Tiles: %d", mOsm->getHddTilesLoaded());
-            painter.drawText(width() - 140.0, start_txt, txt);
+            painter.drawText(width() - txtOffset, start_txt, txt);
             start_txt += txt_row_h;
 
             txt.sprintf("RAM Tiles: %d", mOsm->getRamTilesLoaded());
-            painter.drawText(width() - 140.0, start_txt, txt);
+            painter.drawText(width() - txtOffset, start_txt, txt);
             start_txt += txt_row_h;
         }
     }
@@ -1233,13 +1300,31 @@ void MapWidget::paintEvent(QPaintEvent *event)
     // Some info
     if (info_segments > 0) {
         txt.sprintf("Info seg: %d", info_segments);
-        painter.drawText(width() - 140.0, start_txt, txt);
+        painter.drawText(width() - txtOffset, start_txt, txt);
         start_txt += txt_row_h;
     }
 
     if (info_points > 0) {
         txt.sprintf("Info pts: %d", info_points);
-        painter.drawText(width() - 140.0, start_txt, txt);
+        painter.drawText(width() - txtOffset, start_txt, txt);
+        start_txt += txt_row_h;
+    }
+
+    // Route info
+    if (mRoutes.at(mRouteNow).size() > 0) {
+        LocPoint prev = mRoutes.at(mRouteNow).first();
+        double len = 0.0;
+        for (int i = 1;i < mRoutes.at(mRouteNow).size();i++) {
+            len += prev.getDistanceTo(mRoutes.at(mRouteNow).at(i));
+            prev = mRoutes.at(mRouteNow).at(i);
+        }
+
+        txt.sprintf("RP: %d", mRoutes.at(mRouteNow).size());
+        painter.drawText(width() - txtOffset, start_txt, txt);
+        start_txt += txt_row_h;
+
+        txt.sprintf("RLen: %.2f m", len);
+        painter.drawText(width() - txtOffset, start_txt, txt);
         start_txt += txt_row_h;
     }
 
@@ -1482,6 +1567,16 @@ void MapWidget::setRouteNow(int routeNow)
         QList<LocPoint> l;
         mRoutes.append(l);
     }
+
+    // Clean empty routes
+    while (mRouteNow < (mRoutes.size() - 1)) {
+        if (mRoutes.last().isEmpty()) {
+            mRoutes.removeLast();
+        } else {
+            break;
+        }
+    }
+
     update();
 }
 
@@ -1624,6 +1719,12 @@ int MapWidget::getClosestPoint(LocPoint p, QList<LocPoint> points, double &dist)
     }
 
     return closest;
+}
+
+void MapWidget::drawCircleFast(QPainter &painter, QPointF center, double radius, int type)
+{
+    painter.drawPixmap(center.x() - radius, center.y() - radius,
+                       2.0 * radius, 2.0 * radius, mPixmaps.at(type));
 }
 
 int MapWidget::getOsmZoomLevel() const

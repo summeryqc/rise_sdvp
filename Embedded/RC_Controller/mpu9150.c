@@ -15,6 +15,10 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+ * Note: This driver also works for the MPU9250
+ */
+
 #include "mpu9150.h"
 #include "chprintf.h"
 #include "utils.h"
@@ -52,6 +56,7 @@ static volatile systime_t last_update_time;
 static volatile systime_t update_time_diff;
 static volatile int mag_updated;
 static volatile uint16_t mpu_addr;
+static volatile bool is_mpu9250;
 
 // Public variables
 volatile int16_t mpu9150_gyro_offsets[3];
@@ -66,6 +71,7 @@ static const I2CConfig i2cfg = {
 // Private functions
 static int reset_init_mpu(void);
 static int get_raw_accel_gyro(int16_t* accel_gyro);
+static uint8_t read_single_reg(uint8_t reg);
 #if USE_MAGNETOMETER
 static int get_raw_mag(int16_t* mag);
 #endif
@@ -83,6 +89,7 @@ void mpu9150_init(void) {
 	update_time_diff = 0;
 	mag_updated = 0;
 	mpu_addr = MPU_ADDR1;
+	is_mpu9250 = 0;
 
 	memset((void*)mpu9150_gyro_offsets, 0, sizeof(mpu9150_gyro_offsets));
 
@@ -106,6 +113,17 @@ void mpu9150_init(void) {
 
 	chThdCreateStatic(mpu_thread_wa, sizeof(mpu_thread_wa), NORMALPRIO + 1,
 			mpu_thread, NULL );
+}
+
+/**
+ * Determine wether this is a MPU9150 or a MPU9250.
+ *
+ * @return
+ * false: This is a MPU9150
+ * true: This is a MPU9250
+ */
+bool mpu9150_is_mpu9250(void) {
+	return is_mpu9250;
 }
 
 void mpu9150_set_read_callback(void(*func)(void)) {
@@ -231,31 +249,6 @@ void mpu9150_get_accel_gyro_mag(float *accel, float *gyro, float *mag) {
 	mag[0] = (float)raw_accel_gyro_mag[6] * 1200.0 / 4096.0;
 	mag[1] = (float)raw_accel_gyro_mag[7] * 1200.0 / 4096.0;
 	mag[2] = (float)raw_accel_gyro_mag[8] * 1200.0 / 4096.0;
-
-	/*
-	 * Hard and soft iron compensation
-	 *
-	 * http://davidegironi.blogspot.it/2013/01/magnetometer-calibration-helper-01-for.html#.UriTqkMjulM
-	 *
-	 * xt_raw = x_raw - offsetx;
-	 * yt_raw = y_raw - offsety;
-	 * zt_raw = z_raw - offsetz;
-	 * x_calibrated = scalefactor_x[1] * xt_raw + scalefactor_x[2] * yt_raw + scalefactor_x[3] * zt_raw;
-	 * y_calibrated = scalefactor_y[1] * xt_raw + scalefactor_y[2] * yt_raw + scalefactor_y[3] * zt_raw;
-	 * z_calibrated = scalefactor_z[1] * xt_raw + scalefactor_z[2] * yt_raw + scalefactor_z[3] * zt_raw;
-	 */
-	if (main_config.mag_comp) {
-		float mag_t[3];
-
-		mag_t[0] = mag[0] - main_config.mag_cal_cx;
-		mag_t[1] = mag[1] - main_config.mag_cal_cy;
-		mag_t[2] = mag[2] - main_config.mag_cal_cz;
-
-		mag[0] = main_config.mag_cal_xx * mag_t[0] + main_config.mag_cal_xy * mag_t[1] + main_config.mag_cal_xz * mag_t[2];
-		mag[1] = main_config.mag_cal_yx * mag_t[0] + main_config.mag_cal_yy * mag_t[1] + main_config.mag_cal_yz * mag_t[2];
-		mag[2] = main_config.mag_cal_zx * mag_t[0] + main_config.mag_cal_zy * mag_t[1] + main_config.mag_cal_zz * mag_t[2];
-	}
-
 #else
 	mag[0] = 0.0;
 	mag[1] = 0.0;
@@ -446,6 +439,8 @@ static int reset_init_mpu(void) {
 	}
 #endif
 
+	is_mpu9250 = read_single_reg(MPU9150_WHO_AM_I) == 0x71;
+
 	return 1;
 }
 
@@ -474,6 +469,24 @@ static int get_raw_accel_gyro(int16_t* accel_gyro) {
 	}
 
 	return 1;
+}
+
+static uint8_t read_single_reg(uint8_t reg) {
+	msg_t res = MSG_OK;
+
+	uint8_t rxb[2];
+	uint8_t txb[2];
+
+	txb[0] = reg;
+	i2cAcquireBus(&I2C_DEV);
+	res = i2cMasterTransmitTimeout(&I2C_DEV, mpu_addr, txb, 1, rxb, 1, MPU_I2C_TIMEOUT);
+	i2cReleaseBus(&I2C_DEV);
+
+	if (res != MSG_OK) {
+		return 0;
+	} else {
+		return rxb[0];
+	}
 }
 
 #if USE_MAGNETOMETER

@@ -55,6 +55,7 @@ public:
     void setCtrlAp();
     void setCtrlKb();
     bool setAp(bool on);
+    void disableKbBox();
 
 signals:
     void terminalCmd(quint8 id, QString cmd);
@@ -129,6 +130,7 @@ private:
     TcpServerSimple *mTcpServer;
     bool mExperimentReplot;
     QString mFaultLast;
+    bool settingsReadDone;
 
     void getConfGui(MAIN_CONFIG &conf);
     void setConfGui(MAIN_CONFIG &conf);

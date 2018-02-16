@@ -37,7 +37,7 @@
 
 // Firmware version
 #define FW_VERSION_MAJOR			8
-#define FW_VERSION_MINOR			5
+#define FW_VERSION_MINOR			17
 
 // Default car settings
 //#define CAR_TERO // Benjamins tero car
@@ -45,21 +45,31 @@
 
 // Defaults for different cars
 #ifdef CAR_TERO
-#define IMU_ROT_180					1
+#define BOARD_YAW_ROT				180.0
 #endif
 
 // Ublox settings
 #ifndef UBLOX_EN
 #define UBLOX_EN					1
 #endif
+#ifndef UBLOX_USE_PPS
+#define UBLOX_USE_PPS				1
+#endif
+
+// External PPS signal for accurate time synchronization and delay compensation on PD4.
+#ifndef GPS_EXT_PPS
+#define GPS_EXT_PPS					0
+#endif
+
+// CAN settings
+#define CAN_EN_DW					0
 
 // Log configuration to enable. Choose one only.
-#define LOG_EN_CARREL
+//#define LOG_EN_CARREL
 //#define LOG_EN_ITRANSIT
 //#define LOG_EN_DW
-
-// Logging time interval
-#define LOG_INTERVAL_MS				10
+#define LOG_EN_SW
+#define LOG_EN_CORR
 
 // Anchor IDs to range against in DW logging mode. -1 to disable.
 #define LOG_DW_ANCHOR0				122
@@ -79,8 +89,8 @@
 #define ID_MOTE						254 // If the packet is for the mote and not to be forwarded in mote mode
 
 // Car parameters
-#ifndef IMU_ROT_180
-#define IMU_ROT_180					0
+#ifndef BOARD_YAW_ROT
+#define BOARD_YAW_ROT				0.0
 #endif
 
 // Radar settings
@@ -96,6 +106,9 @@
 #define RADAR_PLOT_MODE				0
 #define RADAR_MAP_PLOT_START		20
 #define RADAR_MAP_PLOT_END			300
+
+// radar_cont
+#define RADAR_CONT_EN				0
 
 // Servo settings
 #define SERVO_OUT_RATE_HZ			50

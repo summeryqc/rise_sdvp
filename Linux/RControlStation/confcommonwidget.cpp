@@ -55,6 +55,7 @@ void ConfCommonWidget::getConfGui(MAIN_CONFIG &conf)
     conf.gps_ant_y = ui->confGpsAntYBox->value();
     conf.gps_comp = ui->confGpsCorrBox->isChecked();
     conf.gps_req_rtk = ui->confGpsReqRtkBox->isChecked();
+    conf.gps_use_rtcm_base_as_enu_ref = ui->confGpsEnuRefBaseBox->isChecked();
     conf.gps_corr_gain_stat = ui->confGpsCorrStatBox->value();
     conf.gps_corr_gain_dyn = ui->confGpsCorrDynBox->value();
     conf.gps_corr_gain_yaw = ui->confGpsCorrYawBox->value();
@@ -64,12 +65,30 @@ void ConfCommonWidget::getConfGui(MAIN_CONFIG &conf)
 
     conf.ap_repeat_routes = ui->confApRepeatBox->isChecked();
     conf.ap_base_rad = ui->confApBaseRadBox->value();
-    conf.ap_mode_time = ui->confApModeTimeBox->isChecked();
     conf.ap_max_speed = ui->confApMaxSpeedBox->value() / 3.6;
     conf.ap_time_add_repeat_ms = ui->confApAddRepeatTimeEdit->time().msecsSinceStartOfDay();
 
+    if (ui->confApModeSpeedButton->isChecked()) {
+        conf.ap_mode_time = 0;
+    } else if (ui->confApModeTimeAbsButton->isChecked()) {
+        conf.ap_mode_time = 1;
+    } else if (ui->confApModeTimeRelButton->isChecked()) {
+        conf.ap_mode_time = 2;
+    }
+
+    conf.log_rate_hz = ui->confLogRateBox->value();
     conf.log_en = ui->confLogEnBox->isChecked();
     strcpy(conf.log_name, ui->confLogNameEdit->text().toLocal8Bit().data());
+
+    if (ui->confLogUartOffButton->isChecked()) {
+        conf.log_en_uart = 0;
+    } else if (ui->confLogUartContButton->isChecked()) {
+        conf.log_en_uart = 1;
+    } else if (ui->confLogUartPolledButton->isChecked()) {
+        conf.log_en_uart = 2;
+    }
+
+    conf.log_uart_baud = ui->confLogUartBaudBox->value();
 }
 
 void ConfCommonWidget::setConfGui(const MAIN_CONFIG &conf)
@@ -95,6 +114,7 @@ void ConfCommonWidget::setConfGui(const MAIN_CONFIG &conf)
     ui->confGpsAntYBox->setValue(conf.gps_ant_y);
     ui->confGpsCorrBox->setChecked(conf.gps_comp);
     ui->confGpsReqRtkBox->setChecked(conf.gps_req_rtk);
+    ui->confGpsEnuRefBaseBox->setChecked(conf.gps_use_rtcm_base_as_enu_ref);
     ui->confGpsCorrStatBox->setValue(conf.gps_corr_gain_stat);
     ui->confGpsCorrDynBox->setValue(conf.gps_corr_gain_dyn);
     ui->confGpsCorrYawBox->setValue(conf.gps_corr_gain_yaw);
@@ -104,12 +124,28 @@ void ConfCommonWidget::setConfGui(const MAIN_CONFIG &conf)
 
     ui->confApRepeatBox->setChecked(conf.ap_repeat_routes);
     ui->confApBaseRadBox->setValue(conf.ap_base_rad);
-    ui->confApModeTimeBox->setChecked(conf.ap_mode_time);
     ui->confApMaxSpeedBox->setValue(conf.ap_max_speed * 3.6);
     ui->confApAddRepeatTimeEdit->setTime(QTime::fromMSecsSinceStartOfDay(conf.ap_time_add_repeat_ms));
 
+    switch (conf.ap_mode_time) {
+    case 0: ui->confApModeSpeedButton->setChecked(true); break;
+    case 1: ui->confApModeTimeAbsButton->setChecked(true); break;
+    case 2: ui->confApModeTimeRelButton->setChecked(true); break;
+    default: break;
+    }
+
+    ui->confLogRateBox->setValue(conf.log_rate_hz);
     ui->confLogEnBox->setChecked(conf.log_en);
     ui->confLogNameEdit->setText(QString::fromLocal8Bit(conf.log_name));
+
+    switch (conf.log_en_uart) {
+    case 0: ui->confLogUartOffButton->setChecked(true); break;
+    case 1: ui->confLogUartContButton->setChecked(true); break;
+    case 2: ui->confLogUartPolledButton->setChecked(true); break;
+    default: break;
+    }
+
+    ui->confLogUartBaudBox->setValue(conf.log_uart_baud);
 }
 
 void ConfCommonWidget::setMagComp(QVector<double> comp)

@@ -343,4 +343,112 @@ bool truncate_number_abs(double *number, double max)
     return did_trunc;
 }
 
+void norm_angle(double *angle)
+{
+    while (*angle < -180.0) {
+        *angle += 360.0;
+    }
+
+    while (*angle >  180.0) {
+        *angle -= 360.0;
+    }
+}
+
+void norm_angle_rad(double *angle)
+{
+    while (*angle < -M_PI) {
+        *angle += 2.0 * M_PI;
+    }
+
+    while (*angle >  M_PI) {
+        *angle -= 2.0 * M_PI;
+    }
+}
+
+/**
+ * Get the difference between two angles. Will always be between -180 and +180 degrees.
+ * @param angle1
+ * The first angle
+ * @param angle2
+ * The second angle
+ * @return
+ * The difference between the angles
+ */
+double angle_difference(double angle1, double angle2) {
+    // Faster in most cases
+    double difference = angle1 - angle2;
+    while (difference < -180.0) difference += 2.0 * 180.0;
+    while (difference > 180.0) difference -= 2.0 * 180.0;
+    return difference;
+}
+
+/**
+ * Get the difference between two angles. Will always be between -pi and +pi radians.
+ * @param angle1
+ * The first angle in radians
+ * @param angle2
+ * The second angle in radians
+ * @return
+ * The difference between the angles in radians
+ */
+double angle_difference_rad(double angle1, double angle2) {
+    double difference = angle1 - angle2;
+    while (difference < -M_PI) difference += 2.0 * M_PI;
+    while (difference > M_PI) difference -= 2.0 * M_PI;
+    return difference;
+}
+
+bool uploadRouteHelper(PacketInterface *packetInterface, int carId, QList<LocPoint> route)
+{
+    bool ok = true;
+    int len = route.size();
+    int ind = 0;
+    for (ind = 0;ind < len;ind += 5) {
+        QList<LocPoint> tmpList;
+        for (int j = ind;j < (ind + 5);j++) {
+            if (j < len) {
+                tmpList.append(route.at(j));
+            }
+        }
+
+        ok = packetInterface->setRoutePoints(carId, tmpList);
+
+        if (!ok) {
+            break;
+        }
+    }
+
+    return ok;
+}
+
+bool replaceRouteHelper(PacketInterface *packetInterface, int carId, QList<LocPoint> route)
+{
+    bool ok = true;
+    bool first = true;
+    int len = route.size();
+    int ind = 0;
+    for (ind = 0;ind < len;ind += 5) {
+        QList<LocPoint> tmpList;
+        for (int j = ind;j < (ind + 5);j++) {
+            if (j < len) {
+                tmpList.append(route.at(j));
+            }
+        }
+
+        if (first) {
+            ok = packetInterface->replaceRoute(carId, tmpList);
+        } else {
+            ok = packetInterface->setRoutePoints(carId, tmpList);
+        }
+
+        first = false;
+
+        if (!ok) {
+            break;
+        }
+    }
+
+    return ok;
+}
+
 }

@@ -15,12 +15,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <ahrs.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "ch.h"
 #include "hal.h"
+#include "ahrs.h"
 #include "stm32f4xx_conf.h"
 #include "led.h"
 #include "mpu9150.h"
@@ -31,9 +32,12 @@
 #include "ublox.h"
 #include "mr_control.h"
 #include "srf10.h"
+#include "terminal.h"
+#include "log.h"
 
 // Defines
 #define ITERATION_TIMER_FREQ			50000
+#define POS_HISTORY_LEN					100
 
 // Private variables
 static ATTITUDE_INFO m_att;
@@ -43,6 +47,7 @@ static bool m_attitude_init_done;
 static float m_accel[3];
 static float m_gyro[3];
 static float m_mag[3];
+static float m_mag_raw[3];
 static mc_values m_mc_val;
 static float m_imu_yaw;
 static float m_yaw_offset_gps;
@@ -50,13 +55,21 @@ static mutex_t m_mutex_pos;
 static mutex_t m_mutex_gps;
 static int32_t m_ms_today;
 static bool m_ubx_pos_valid;
+static int32_t m_nma_last_time;
+static POS_POINT m_pos_history[POS_HISTORY_LEN];
+static int m_pos_history_ptr;
+static bool m_pos_history_print;
+static int32_t m_pps_cnt;
 
 // Private functions
+static void cmd_terminal_delay_info(int argc, const char **argv);
 static void mpu9150_read(void);
 static void update_orientation_angles(float *accel, float *gyro, float *mag, float dt);
 static void init_gps_local(GPS_STATE *gps);
 static double nmea_parse_val(char *str);
 static void ublox_relposned_rx(ubx_nav_relposned *pos);
+static void save_pos_history(void);
+static POS_POINT get_closest_point_to_time(int32_t time);
 static void correct_pos_gps(POS_STATE *pos);
 
 #if MAIN_MODE == MAIN_MODE_CAR
@@ -77,12 +90,12 @@ void pos_init(void) {
 	memset(&m_mc_val, 0, sizeof(m_mc_val));
 	m_imu_yaw = 0.0;
 	m_ubx_pos_valid = true;
-
-#ifdef IMU_ROT_180
-	m_yaw_offset_gps = -90.0;
-#else
-	m_yaw_offset_gps = 90.0;
-#endif
+	m_nma_last_time = 0;
+	memset(&m_pos_history, 0, sizeof(m_pos_history));
+	m_pos_history_ptr = 0;
+	m_pos_history_print = false;
+	m_pps_cnt = 0;
+	m_yaw_offset_gps = 0.0;
 
 	m_ms_today = -1;
 	chMtxObjectInit(&m_mutex_pos);
@@ -113,6 +126,43 @@ void pos_init(void) {
 #elif MAIN_MODE == MAIN_MODE_MULTIROTOR
 	srf10_set_sample_callback(srf_distance_received);
 #endif
+
+	// PPS interrupt
+#if UBLOX_EN && UBLOX_USE_PPS
+	extChannelEnable(&EXTD1, 8);
+#elif GPS_EXT_PPS
+	palSetPadMode(GPIOD, 4, PAL_MODE_INPUT_PULLDOWN);
+	extChannelEnable(&EXTD1, 4);
+#endif
+
+	terminal_register_command_callback(
+			"delay_info",
+			"Print delay information when doing GNSS position correction.\n"
+			"  0 - Disabled\n"
+			"  1 - Enabled",
+			"[print_en]",
+			cmd_terminal_delay_info);
+
+#ifdef LOG_EN_SW
+	palSetPadMode(GPIOD, 3, PAL_MODE_INPUT_PULLUP);
+#endif
+
+	(void)save_pos_history();
+}
+
+void pos_pps_cb(EXTDriver *extp, expchannel_t channel) {
+	(void)extp;
+	(void)channel;
+
+	m_pps_cnt++;
+
+	// Assume that the last NMEA time stamp is less than one second
+	// old and round to the closest second after it.
+	if (m_nma_last_time != 0) {
+		int32_t s_today = m_nma_last_time / 1000;
+		s_today++;
+		m_ms_today = s_today * 1000;
+	}
 }
 
 void pos_get_imu(float *accel, float *gyro, float *mag) {
@@ -129,9 +179,9 @@ void pos_get_imu(float *accel, float *gyro, float *mag) {
 	}
 
 	if (mag) {
-		mag[0] = m_mag[0];
-		mag[1] = m_mag[1];
-		mag[2] = m_mag[2];
+		mag[0] = m_mag_raw[0];
+		mag[1] = m_mag_raw[1];
+		mag[2] = m_mag_raw[2];
 	}
 }
 
@@ -356,7 +406,11 @@ bool pos_input_nmea(const char *data) {
 	}
 
 	if (ms >= 0) {
+		m_nma_last_time = ms;
+
+#if !(UBLOX_EN && UBLOX_USE_PPS) && !GPS_EXT_PPS
 		m_ms_today = ms;
+#endif
 	}
 
 	// Only use valid fixes
@@ -411,12 +465,17 @@ bool pos_input_nmea(const char *data) {
 			m_pos.py_gps = py;
 			m_pos.pz_gps = m_gps.lz;
 			m_pos.gps_ms = m_gps.ms;
+			m_pos.gps_fix_type = m_gps.fix_type;
 
 			// Correct position
 			// Optionally require RTK and good ublox quality indication.
 			if (main_config.gps_comp &&
 					(!main_config.gps_req_rtk || (fix_type == 4 || fix_type == 5)) &&
 					(!main_config.gps_use_ubx_info || m_ubx_pos_valid)) {
+
+				m_pos.gps_last_corr_diff = sqrtf(SQ(m_pos.px - m_pos.px_gps) +
+						SQ(m_pos.py - m_pos.py_gps));
+				log_update_corr_pos(&m_pos);
 
 				correct_pos_gps(&m_pos);
 				m_pos.gps_corr_time = chVTGetSystemTimeX();
@@ -459,6 +518,22 @@ void pos_reset_attitude(void) {
  */
 int pos_time_since_gps_corr(void) {
 	return ST2MS(chVTTimeElapsedSinceX(m_pos.gps_corr_time));
+}
+
+static void cmd_terminal_delay_info(int argc, const char **argv) {
+	if (argc == 2) {
+		if (strcmp(argv[1], "0") == 0) {
+			m_pos_history_print = 0;
+			commands_printf("OK\n");
+		} else if (strcmp(argv[1], "1") == 0) {
+			m_pos_history_print = 1;
+			commands_printf("OK\n");
+		} else {
+			commands_printf("Invalid argument %s\n", argv[1]);
+		}
+	} else {
+		commands_printf("Wrong number of arguments\n");
+	}
 }
 
 static void mpu9150_read(void) {
@@ -511,6 +586,15 @@ static void mpu9150_read(void) {
 #if MAIN_MODE == MAIN_MODE_MULTIROTOR
 	mr_control_run_iteration(dt);
 #endif
+
+#ifdef LOG_EN_SW
+	static int sw_cnt = 0;
+	if (!palReadPad(GPIOD, 3) && sw_cnt > 100) {
+		sw_cnt = 0;
+		log_update_sw_pos(&m_pos);
+	}
+	sw_cnt++;
+#endif
 }
 
 static void update_orientation_angles(float *accel, float *gyro, float *mag, float dt) {
@@ -518,28 +602,81 @@ static void update_orientation_angles(float *accel, float *gyro, float *mag, flo
 	gyro[1] = gyro[1] * M_PI / 180.0;
 	gyro[2] = gyro[2] * M_PI / 180.0;
 
-	m_accel[0] = accel[0];
-	m_accel[1] = accel[1];
+	m_mag_raw[0] = mag[0];
+	m_mag_raw[1] = mag[1];
+	m_mag_raw[2] = mag[2];
+
+	/*
+	 * Hard and soft iron compensation
+	 *
+	 * http://davidegironi.blogspot.it/2013/01/magnetometer-calibration-helper-01-for.html#.UriTqkMjulM
+	 *
+	 * xt_raw = x_raw - offsetx;
+	 * yt_raw = y_raw - offsety;
+	 * zt_raw = z_raw - offsetz;
+	 * x_calibrated = scalefactor_x[1] * xt_raw + scalefactor_x[2] * yt_raw + scalefactor_x[3] * zt_raw;
+	 * y_calibrated = scalefactor_y[1] * xt_raw + scalefactor_y[2] * yt_raw + scalefactor_y[3] * zt_raw;
+	 * z_calibrated = scalefactor_z[1] * xt_raw + scalefactor_z[2] * yt_raw + scalefactor_z[3] * zt_raw;
+	 */
+	if (main_config.mag_comp) {
+		float mag_t[3];
+
+		mag_t[0] = mag[0] - main_config.mag_cal_cx;
+		mag_t[1] = mag[1] - main_config.mag_cal_cy;
+		mag_t[2] = mag[2] - main_config.mag_cal_cz;
+
+		mag[0] = main_config.mag_cal_xx * mag_t[0] + main_config.mag_cal_xy * mag_t[1] + main_config.mag_cal_xz * mag_t[2];
+		mag[1] = main_config.mag_cal_yx * mag_t[0] + main_config.mag_cal_yy * mag_t[1] + main_config.mag_cal_yz * mag_t[2];
+		mag[2] = main_config.mag_cal_zx * mag_t[0] + main_config.mag_cal_zy * mag_t[1] + main_config.mag_cal_zz * mag_t[2];
+	}
+
+	// Swap mag X and Y to match the accelerometer
+	{
+		float tmp[3];
+		tmp[0] = mag[1];
+		tmp[1] = mag[0];
+		tmp[2] = mag[2];
+		mag[0] = tmp[0];
+		mag[1] = tmp[1];
+		mag[2] = tmp[2];
+	}
+
+	// Rotate board yaw orientation
+	float rotf = 0.0;
+
+	// The MPU9250 footprint is rotated 180 degrees compared to the one
+	// for the MPU9150 on our PCB. Make sure that the code behaves the
+	// same regardless which one is used.
+	if (mpu9150_is_mpu9250()) {
+		rotf += 180.0;
+	}
+
+#ifdef BOARD_YAW_ROT
+	rotf += BOARD_YAW_ROT;
+#endif
+
+	rotf *= M_PI / 180.0;
+	utils_norm_angle_rad(&rotf);
+
+	float cRot = cosf(rotf);
+	float sRot = sinf(rotf);
+
+	m_accel[0] = cRot * accel[0] + sRot * accel[1];
+	m_accel[1] = cRot * accel[1] - sRot * accel[0];
 	m_accel[2] = accel[2];
-	m_gyro[0] = gyro[0];
-	m_gyro[1] = gyro[1];
+	m_gyro[0] = cRot * gyro[0] + sRot * gyro[1];
+	m_gyro[1] = cRot * gyro[1] - sRot * gyro[0];
 	m_gyro[2] = gyro[2];
-	m_mag[0] = mag[0];
-	m_mag[1] = mag[1];
+	m_mag[0] = cRot * mag[0] + sRot * mag[1];
+	m_mag[1] = cRot * mag[1] - sRot * mag[0];
 	m_mag[2] = mag[2];
 
-	// Swap X and Y to match the accelerometer of the MPU9150
-	float mag_tmp[3];
-	mag_tmp[0] = mag[1];
-	mag_tmp[1] = mag[0];
-	mag_tmp[2] = mag[2];
-
 	if (!m_attitude_init_done) {
-		ahrs_update_initial_orientation(accel, mag_tmp, (ATTITUDE_INFO*)&m_att);
+		ahrs_update_initial_orientation(m_accel, m_mag, (ATTITUDE_INFO*)&m_att);
 		m_attitude_init_done = true;
 	} else {
 		//		ahrs_update_mahony_imu(gyro, accel, dt, (ATTITUDE_INFO*)&m_att);
-		ahrs_update_madgwick_imu(gyro, accel, dt, (ATTITUDE_INFO*)&m_att);
+		ahrs_update_madgwick_imu(m_gyro, m_accel, dt, (ATTITUDE_INFO*)&m_att);
 	}
 
 	float roll = ahrs_get_roll((ATTITUDE_INFO*)&m_att);
@@ -549,10 +686,10 @@ static void update_orientation_angles(float *accel, float *gyro, float *mag, flo
 	// Apply tilt compensation for magnetometer values and calculate magnetic
 	// field angle. See:
 	// https://cache.freescale.com/files/sensors/doc/app_note/AN4248.pdf
-	// Notice that hard and soft iron compensation is applied in mpu9150.c
-	float mx = -mag_tmp[0];
-	float my = mag_tmp[1];
-	float mz = mag_tmp[2];
+	// Notice that hard and soft iron compensation is applied above
+	float mx = -m_mag[0];
+	float my = m_mag[1];
+	float mz = m_mag[2];
 
 	float sr = sinf(roll);
 	float cr = cosf(roll);
@@ -562,37 +699,34 @@ static void update_orientation_angles(float *accel, float *gyro, float *mag, flo
 	float c_mx = mx * cp + my * sr * sp + mz * sp * cr;
 	float c_my = my * cr - mz * sr;
 
-	float yaw_mag = atan2f(-c_my, c_mx);
+	float yaw_mag = atan2f(-c_my, c_mx) - M_PI / 2.0;
 
 	chMtxLock(&m_mutex_pos);
 
-#if IMU_ROT_180
-	m_pos.roll = -roll * 180.0 / M_PI;
-	m_pos.pitch = -pitch * 180.0 / M_PI;
-	m_pos.roll_rate = gyro[0] * 180.0 / M_PI;
-	m_pos.pitch_rate = -gyro[1] * 180.0 / M_PI;
-#else
 	m_pos.roll = roll * 180.0 / M_PI;
 	m_pos.pitch = pitch * 180.0 / M_PI;
-	m_pos.roll_rate = -gyro[0] * 180.0 / M_PI;
-	m_pos.pitch_rate = gyro[1] * 180.0 / M_PI;
-#endif
+	m_pos.roll_rate = -m_gyro[0] * 180.0 / M_PI;
+	m_pos.pitch_rate = m_gyro[1] * 180.0 / M_PI;
 
 	if (main_config.mag_use) {
-		static float yaw_ofs = 0.0;
-		float yaw_imu = yaw + yaw_ofs * M_PI / 180.0;
-		float yaw_diff = utils_angle_difference_rad(yaw_mag, yaw_imu) * 180.0 / M_PI;
+		static float yaw_now = 0;
+		static float yaw_imu_last = 0;
 
-		utils_step_towards(&yaw_ofs, yaw_ofs + yaw_diff, main_config.yaw_mag_gain);
-		utils_norm_angle(&yaw_ofs);
+		float yaw_imu_diff = utils_angle_difference_rad(yaw, yaw_imu_last);
+		yaw_imu_last = yaw;
+		yaw_now += yaw_imu_diff;
 
-		m_imu_yaw = (yaw * 180.0 / M_PI) + yaw_ofs;
+		float diff = utils_angle_difference_rad(yaw_mag, yaw_now);
+		yaw_now += SIGN(diff) * main_config.yaw_mag_gain * M_PI / 180.0 * dt;
+		utils_norm_angle_rad(&yaw_now);
+
+		m_imu_yaw = yaw_now * 180.0 / M_PI;
 	} else {
 		m_imu_yaw = yaw * 180.0 / M_PI;
 	}
 
 	utils_norm_angle(&m_imu_yaw);
-	m_pos.yaw_rate = -gyro[2] * 180.0 / M_PI;
+	m_pos.yaw_rate = -m_gyro[2] * 180.0 / M_PI;
 
 	// Correct yaw
 #if MAIN_MODE == MAIN_MODE_CAR
@@ -703,35 +837,101 @@ static void ublox_relposned_rx(ubx_nav_relposned *pos) {
 	m_ubx_pos_valid = valid;
 }
 
+static void save_pos_history(void) {
+	m_pos_history[m_pos_history_ptr].px = m_pos.px;
+	m_pos_history[m_pos_history_ptr].py = m_pos.py;
+	m_pos_history[m_pos_history_ptr].pz = m_pos.pz;
+	m_pos_history[m_pos_history_ptr].yaw = m_pos.yaw;
+	m_pos_history[m_pos_history_ptr].speed = m_pos.speed;
+	m_pos_history[m_pos_history_ptr].time = m_ms_today;
+
+	m_pos_history_ptr++;
+	if (m_pos_history_ptr >= POS_HISTORY_LEN) {
+		m_pos_history_ptr = 0;
+	}
+}
+
+static POS_POINT get_closest_point_to_time(int32_t time) {
+	int32_t ind = m_pos_history_ptr > 0 ? m_pos_history_ptr - 1 : POS_HISTORY_LEN - 1;
+	int32_t min_diff = abs(time - m_pos_history[ind].time);
+	int32_t ind_use = ind;
+
+	int cnt = 0;
+	for (;;) {
+		ind = ind > 0 ? ind - 1 : POS_HISTORY_LEN - 1;
+
+		if (ind == m_pos_history_ptr) {
+			break;
+		}
+
+		int32_t diff = abs(time - m_pos_history[ind].time);
+
+		if (diff < min_diff) {
+			min_diff = diff;
+			ind_use = ind;
+		} else {
+			break;
+		}
+
+		cnt++;
+	}
+
+	if (m_pos_history_print) {
+		commands_printf("Age: %d ms Ind: %d, Diff: %d ms PPS_CNT: %d",
+				m_ms_today - time, cnt, min_diff, m_pps_cnt);
+	}
+
+	return m_pos_history[ind_use];
+}
+
 static void correct_pos_gps(POS_STATE *pos) {
 #if MAIN_MODE == MAIN_MODE_MULTIROTOR
 	pos->gps_corr_cnt = sqrtf(SQ(pos->px_gps - pos->px_gps_last) +
 			SQ(pos->py_gps - pos->py_gps_last));
 #endif
 
-	float gain = main_config.gps_corr_gain_stat +
-			main_config.gps_corr_gain_dyn * pos->gps_corr_cnt;
-
-	float yaw_gps = atan2f(pos->py_gps - pos->gps_ang_corr_y_last_gps,
-			pos->px_gps - pos->gps_ang_corr_x_last_gps);
-	float yaw_car = atan2f(pos->py - pos->gps_ang_corr_y_last_car,
-			pos->px - pos->gps_ang_corr_x_last_car);
-	float yaw_diff = utils_angle_difference_rad(yaw_gps, yaw_car) * 180.0 / M_PI;
-
+	// Angle
 	if (fabsf(pos->speed * 3.6) > 0.5) {
+		float yaw_gps = atan2f(pos->py_gps - pos->gps_ang_corr_y_last_gps,
+				pos->px_gps - pos->gps_ang_corr_x_last_gps);
+		float yaw_car = atan2f(pos->py - pos->gps_ang_corr_y_last_car,
+				pos->px - pos->gps_ang_corr_x_last_car);
+		float yaw_diff = utils_angle_difference_rad(yaw_gps, yaw_car) * 180.0 / M_PI;
+
 		utils_step_towards(&m_yaw_offset_gps, m_yaw_offset_gps + yaw_diff,
 				main_config.gps_corr_gain_yaw * pos->gps_corr_cnt);
+
+		// TODO: Finish and test new angle correction
+		//		float dx = closest.px - pos->px_gps;
+		//		float dy = closest.py - pos->py_gps;
+		//		float d = sqrtf(SQ(dx) + SQ(dy));
+		//		float al2 = atan2f(dy, dx);
+		//		float al3 = utils_angle_difference((closest.yaw * (M_PI / 180.0)), al2);
+		//		float ds = d * cosf(al3);
+		//		if (d < 0.1) {
+		//			d = 0.1;
+		//		}
+		//		m_yaw_offset_gps += (ds / d) * al3 * main_config.gps_corr_gain_yaw;
 	}
 
 	utils_norm_angle(&m_yaw_offset_gps);
 
-	utils_step_towards(&pos->px, pos->px_gps, gain);
-	utils_step_towards(&pos->py, pos->py_gps, gain);
+	// Position
+	float gain = main_config.gps_corr_gain_stat +
+			main_config.gps_corr_gain_dyn * pos->gps_corr_cnt;
+
+	POS_POINT closest = get_closest_point_to_time(pos->gps_ms);
+
+	POS_POINT closest_corr = closest;
+	utils_step_towards(&closest_corr.px, pos->px_gps, gain);
+	utils_step_towards(&closest_corr.py, pos->py_gps, gain);
+	pos->px += closest_corr.px - closest.px;
+	pos->py += closest_corr.py - closest.py;
 
 	pos->gps_ang_corr_x_last_gps = pos->px_gps;
 	pos->gps_ang_corr_y_last_gps = pos->py_gps;
-	pos->gps_ang_corr_x_last_car = pos->px;
-	pos->gps_ang_corr_y_last_car = pos->py;
+	pos->gps_ang_corr_x_last_car = closest.px;
+	pos->gps_ang_corr_y_last_car = closest.py;
 
 	// Update multirotor state
 #if MAIN_MODE == MAIN_MODE_MULTIROTOR
@@ -821,8 +1021,8 @@ static void mc_values_received(mc_values *val) {
 
 	float steering_angle = (servo_simple_get_pos_now()
 			- main_config.car.steering_center)
-											* ((2.0 * main_config.car.steering_max_angle_rad)
-													/ main_config.car.steering_range);
+													* ((2.0 * main_config.car.steering_max_angle_rad)
+															/ main_config.car.steering_range);
 
 	chMtxLock(&m_mutex_pos);
 
@@ -858,6 +1058,8 @@ static void mc_values_received(mc_values *val) {
 	m_pos.speed = val->rpm * main_config.car.gear_ratio
 			* (2.0 / main_config.car.motor_poles) * (1.0 / 60.0)
 			* main_config.car.wheel_diam * M_PI;
+
+	save_pos_history();
 
 	chMtxUnlock(&m_mutex_pos);
 }

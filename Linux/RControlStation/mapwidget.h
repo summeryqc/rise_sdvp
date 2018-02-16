@@ -57,16 +57,17 @@ public:
     void setRotation(double rotation);
     void setXOffset(double offset);
     void setYOffset(double offset);
+    void moveView(double px, double py);
     void clearTrace();
     void addRoutePoint(double px, double py, double speed = 0.0, qint32 time = 0);
-    QList<LocPoint> getRoute();
+    QList<LocPoint> getRoute(int ind = -1);
     QList<QList<LocPoint> > getRoutes();
     void setRoute(const QList<LocPoint> &route);
     void addRoute(const QList<LocPoint> &route);
     void clearRoute();
     void clearAllRoutes();
     void setRoutePointSpeed(double speed);
-    void addInfoPoint(LocPoint &info);
+    void addInfoPoint(LocPoint &info, bool updateMap = true);
     void clearInfoTrace();
     void clearAllInfoTraces();
     void addPerspectivePixmap(PerspectivePixmap map);
@@ -174,6 +175,7 @@ private:
     int mInfoTraceNow;
     double mTraceMinSpaceCar;
     double mTraceMinSpaceGps;
+    QList<QPixmap> mPixmaps;
 
     void updateClosestInfoPoint();
     int drawInfoPoints(QPainter &painter, const QList<LocPoint> &pts,
@@ -181,6 +183,7 @@ private:
                        double xStart, double xEnd, double yStart, double yEnd,
                        double min_dist);
     int getClosestPoint(LocPoint p, QList<LocPoint> points, double &dist);
+    void drawCircleFast(QPainter &painter, QPointF center, double radius, int type = 0);
 
 };
 

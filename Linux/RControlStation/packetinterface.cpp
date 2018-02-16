@@ -317,6 +317,22 @@ bool PacketInterface::sendPacketAck(const unsigned char *data, unsigned int len_
     return ok;
 }
 
+bool PacketInterface::waitSignal(QObject *sender, const char *signal, int timeoutMs)
+{
+    QEventLoop loop;
+    QTimer timeoutTimer;
+    timeoutTimer.setSingleShot(true);
+    timeoutTimer.start(timeoutMs);
+    auto conn1 = connect(sender, signal, &loop, SLOT(quit()));
+    auto conn2 = connect(&timeoutTimer, SIGNAL(timeout()), &loop, SLOT(quit()));
+    loop.exec();
+
+    disconnect(conn1);
+    disconnect(conn2);
+
+    return timeoutTimer.isActive();
+}
+
 void PacketInterface::processPacket(const unsigned char *data, int len)
 {
     QByteArray pkt = QByteArray((const char*)data, len);
@@ -345,6 +361,24 @@ void PacketInterface::processPacket(const unsigned char *data, int len)
         lon = utility::buffer_get_double64(data, 1e16, &ind);
         height = utility::buffer_get_double32(data, 1e3, &ind);
         emit enuRefReceived(id, lat, lon, height);
+    } break;
+
+    case CMD_AP_GET_ROUTE_PART: {
+        int32_t ind = 0;
+        QList<LocPoint> route;
+
+        int routeLen = utility::buffer_get_int32(data, &ind);
+
+        while (ind < len) {
+            LocPoint p;
+            p.setX(utility::buffer_get_double32_auto(data, &ind));
+            p.setY(utility::buffer_get_double32_auto(data, &ind));
+            p.setSpeed(utility::buffer_get_double32_auto(data, &ind));
+            p.setTime(utility::buffer_get_int32(data, &ind));
+            route.append(p);
+        }
+
+        emit routePartReceived(id, routeLen, route);
     } break;
 
     case CMD_SEND_RTCM_USB: {
@@ -383,6 +417,7 @@ void PacketInterface::processPacket(const unsigned char *data, int len)
         conf.gps_ant_y = utility::buffer_get_double32_auto(data, &ind);
         conf.gps_comp = data[ind++];
         conf.gps_req_rtk = data[ind++];
+        conf.gps_use_rtcm_base_as_enu_ref = data[ind++];
         conf.gps_corr_gain_stat = utility::buffer_get_double32_auto(data, &ind);
         conf.gps_corr_gain_dyn = utility::buffer_get_double32_auto(data, &ind);
         conf.gps_corr_gain_yaw = utility::buffer_get_double32_auto(data, &ind);
@@ -396,14 +431,18 @@ void PacketInterface::processPacket(const unsigned char *data, int len)
         conf.ap_max_speed = utility::buffer_get_double32_auto(data, &ind);
         conf.ap_time_add_repeat_ms = utility::buffer_get_int32(data, &ind);
 
+        conf.log_rate_hz = utility::buffer_get_int16(data, &ind);
         conf.log_en = data[ind++];
         strcpy(conf.log_name, (const char*)(data + ind));
         ind += strlen(conf.log_name) + 1;
+        conf.log_en_uart = data[ind++];
+        conf.log_uart_baud = utility::buffer_get_uint32(data, &ind);
 
         // Car settings
         conf.car.yaw_use_odometry = data[ind++];
         conf.car.yaw_imu_gain = utility::buffer_get_double32_auto(data, &ind);
         conf.car.disable_motor = data[ind++];
+        conf.car.simulate_motor = data[ind++];
 
         conf.car.gear_ratio = utility::buffer_get_double32_auto(data, &ind);
         conf.car.wheel_diam = utility::buffer_get_double32_auto(data, &ind);
@@ -652,6 +691,9 @@ void PacketInterface::processPacket(const unsigned char *data, int len)
     case CMD_AP_REPLACE_ROUTE:
         emit ackReceived(id, cmd, "CMD_AP_REPLACE_ROUTE");
         break;
+    case CMD_AP_SYNC_POINT:
+        emit ackReceived(id, cmd, "CMD_AP_SYNC_POINT");
+        break;
     case CMD_SET_MAIN_CONFIG:
         emit ackReceived(id, cmd, "CMD_SET_MAIN_CONFIG");
         break;
@@ -807,6 +849,7 @@ bool PacketInterface::setConfiguration(quint8 id, MAIN_CONFIG &conf, int retries
     utility::buffer_append_double32_auto(mSendBuffer, conf.gps_ant_y, &send_index);
     mSendBuffer[send_index++] = conf.gps_comp;
     mSendBuffer[send_index++] = conf.gps_req_rtk;
+    mSendBuffer[send_index++] = conf.gps_use_rtcm_base_as_enu_ref;
     utility::buffer_append_double32_auto(mSendBuffer, conf.gps_corr_gain_stat, &send_index);
     utility::buffer_append_double32_auto(mSendBuffer, conf.gps_corr_gain_dyn, &send_index);
     utility::buffer_append_double32_auto(mSendBuffer, conf.gps_corr_gain_yaw, &send_index);
@@ -820,14 +863,18 @@ bool PacketInterface::setConfiguration(quint8 id, MAIN_CONFIG &conf, int retries
     utility::buffer_append_double32_auto(mSendBuffer, conf.ap_max_speed, &send_index);
     utility::buffer_append_int32(mSendBuffer, conf.ap_time_add_repeat_ms, &send_index);
 
+    utility::buffer_append_int16(mSendBuffer, conf.log_rate_hz, &send_index);
     mSendBuffer[send_index++] = conf.log_en;
     strcpy((char*)(mSendBuffer + send_index), conf.log_name);
     send_index += strlen(conf.log_name) + 1;
+    mSendBuffer[send_index++] = conf.log_en_uart;
+    utility::buffer_append_uint32(mSendBuffer, conf.log_uart_baud, &send_index);
 
     // Car settings
     mSendBuffer[send_index++] = conf.car.yaw_use_odometry;
     utility::buffer_append_double32_auto(mSendBuffer, conf.car.yaw_imu_gain, &send_index);
     mSendBuffer[send_index++] = conf.car.disable_motor;
+    mSendBuffer[send_index++] = conf.car.simulate_motor;
 
     utility::buffer_append_double32_auto(mSendBuffer, conf.car.gear_ratio, &send_index);
     utility::buffer_append_double32_auto(mSendBuffer, conf.car.wheel_diam, &send_index);
@@ -967,6 +1014,63 @@ bool PacketInterface::sendReboot(quint8 id, bool powerOff, int retries)
     mSendBuffer[send_index++] = CMD_REBOOT_SYSTEM;
     mSendBuffer[send_index++] = powerOff;
     return sendPacketAck(mSendBuffer, send_index, retries);
+}
+
+bool PacketInterface::getRoutePart(quint8 id,
+                                   qint32 first,
+                                   quint8 num,
+                                   QList<LocPoint> &points,
+                                   int &routeLen,
+                                   int retries)
+{
+    quint8 idRx;
+
+    auto conn = connect(this, &PacketInterface::routePartReceived,
+                        [&routeLen, &points, &idRx](quint8 id, int len, const QList<LocPoint> &route){
+        idRx = id;
+        routeLen = len;
+        points.append(route);
+    }
+    );
+
+    bool res = false;
+    for (int i = 0;i < retries;i++) {
+        qint32 send_index = 0;
+        mSendBuffer[send_index++] = id;
+        mSendBuffer[send_index++] = CMD_AP_GET_ROUTE_PART;
+        utility::buffer_append_int32(mSendBuffer, first, &send_index);
+        mSendBuffer[send_index++] = num;
+
+        sendPacket(mSendBuffer, send_index);
+        res = waitSignal(this, SIGNAL(routePartReceived(quint8,int,QList<LocPoint>)), 200);
+
+        if (res) {
+            break;
+        }
+
+        qDebug() << "Retrying to send packet...";
+    }
+
+    disconnect(conn);
+
+    return res;
+}
+
+bool PacketInterface::setSyncPoint(quint8 id, int point, int time, int min_time_diff,
+                                   bool ack, int retries)
+{
+    qint32 send_index = 0;
+    mSendBuffer[send_index++] = id;
+    mSendBuffer[send_index++] = CMD_AP_SYNC_POINT;
+    utility::buffer_append_int32(mSendBuffer, point, &send_index);
+    utility::buffer_append_int32(mSendBuffer, time, &send_index);
+    utility::buffer_append_int32(mSendBuffer, min_time_diff, &send_index);
+
+    if (ack) {
+        return sendPacketAck(mSendBuffer, send_index, retries);
+    } else {
+        return sendPacket(mSendBuffer, send_index);
+    }
 }
 
 bool PacketInterface::sendMoteUbxBase(int mode,

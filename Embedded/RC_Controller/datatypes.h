@@ -72,6 +72,8 @@ typedef struct {
 	float py_gps;
 	float pz_gps;
 	int32_t gps_ms;
+	int gps_fix_type;
+	float gps_last_corr_diff;
 
 	// Previous GPS position and time stamp
 	float px_gps_last;
@@ -112,6 +114,16 @@ typedef struct {
 	int32_t time;
 } ROUTE_POINT;
 
+// Position history point
+typedef struct {
+	float px;
+	float py;
+	float pz;
+	float yaw;
+	float speed;
+	int32_t time;
+} POS_POINT;
+
 typedef enum {
 	MOTE_PACKET_FILL_RX_BUFFER = 0,
 	MOTE_PACKET_FILL_RX_BUFFER_LONG,
@@ -143,8 +155,10 @@ typedef enum {
 	CMD_AP_ADD_POINTS,
 	CMD_AP_REMOVE_LAST_POINT,
 	CMD_AP_CLEAR_POINTS,
+	CMD_AP_GET_ROUTE_PART,
 	CMD_AP_SET_ACTIVE,
 	CMD_AP_REPLACE_ROUTE,
+	CMD_AP_SYNC_POINT,
 	CMD_SEND_RTCM_USB,
 	CMD_SEND_NMEA_RADIO,
 	CMD_SET_YAW_OFFSET,
@@ -194,6 +208,7 @@ typedef struct {
 	bool yaw_use_odometry; // Use odometry data for yaw angle correction.
 	float yaw_imu_gain; // Gain for yaw angle from IMU (vs odometry)
 	bool disable_motor; // Disable motor drive commands to make sure that the motor does not move.
+	bool simulate_motor; // Simulate motor movement without motor controller feedback
 
 	float gear_ratio;
 	float wheel_diam;
@@ -295,6 +310,7 @@ typedef struct {
 	float gps_ant_y; // Antenna offset from vehicle center in Y
 	bool gps_comp; // Use GPS position correction
 	bool gps_req_rtk; // Require RTK solution
+	bool gps_use_rtcm_base_as_enu_ref; // Use RTCM base station position as ENU reference
 	float gps_corr_gain_stat; // Static GPS correction gain
 	float gps_corr_gain_dyn; // Dynamic GPS correction gain
 	float gps_corr_gain_yaw; // Gain for yaw correction
@@ -305,13 +321,16 @@ typedef struct {
 	// Autopilot parameters
 	bool ap_repeat_routes; // Repeat the same route when the end is reached
 	float ap_base_rad; // Radius around car at 0 speed
-	bool ap_mode_time; // Drive to route points based on timestamps instead of speed
+	int ap_mode_time; // Drive to route points based on time (1 = abs time, 2 = rel since start)
 	float ap_max_speed; // Maximum allowed speed for autopilot
 	int32_t ap_time_add_repeat_ms; // Time to add to each point for each repetition of the route
 
 	// Logging
+	int log_rate_hz;
 	bool log_en;
 	char log_name[LOG_NAME_MAX_LEN + 1];
+	int log_en_uart;
+	int log_uart_baud;
 
 	MAIN_CONFIG_CAR car;
 	MAIN_CONFIG_MULTIROTOR mr;
@@ -492,6 +511,100 @@ typedef struct {
 	uint8_t utc_standard;
 } ubx_cfg_nav5;
 
+typedef struct {
+	uint8_t tp_idx; // Timepulse selection. 0=TP1, 1=TP2
+	int16_t ant_cable_delay; // Antenna cable delay in ns
+	int16_t rf_group_delay; // RF group delay in ns
+	uint32_t freq_period; // Frequency or time period, Hz or us
+	uint32_t freq_period_lock; // Frequency or time period when locked to GNSS time, Hz or us
+	uint32_t pulse_len_ratio; // Pulse length or duty cycle, us or 2^-32
+	uint32_t pulse_len_ratio_lock; // Pulse length or duty cycle when locked to GNSS time, us or 2^-32
+	int32_t user_config_delay; // User configurable time pulse delay, ns
+
+	/*
+	 * If set enable time pulse; if pin assigned to another function, other function takes
+	 * precedence. Must be set for FTS variant.
+	 */
+	bool active;
+
+	/*
+	 * If set synchronize time pulse to GNSS as soon as GNSS time is valid. If not
+	 * set, or before GNSS time is valid use local clock. This flag is ignored by
+	 * the FTS product variant; in this case the receiver always locks to the best
+	 * available time/frequency reference (which is not necessarily GNSS).
+	 */
+	bool lockGnssFreq;
+
+	/*
+	 * If set the receiver switches between the timepulse settings given by 'freqPeriodLocked' &
+	 * 'pulseLenLocked' and those given by 'freqPeriod' & 'pulseLen'. The 'Locked' settings are
+	 * used where the receiver has an accurate sense of time. For non-FTS products, this occurs
+	 * when GNSS solution with a reliable time is available, but for FTS products the setting syncMode
+	 * field governs behavior. In all cases, the receiver only uses 'freqPeriod' & 'pulseLen' when
+	 * the flag is unset.
+	 */
+	bool lockedOtherSet;
+
+	/*
+	 * If set 'freqPeriodLock' and 'freqPeriod' are interpreted as frequency,
+	 * otherwise interpreted as period.
+	 */
+	bool isFreq;
+
+	/*
+	 * If set 'pulseLenRatioLock' and 'pulseLenRatio' interpreted as pulse
+	 * length, otherwise interpreted as duty cycle.
+	 */
+	bool isLength;
+
+	/*
+	 * Align pulse to top of second (period time must be integer fraction of 1s).
+	 * Also set 'lockGnssFreq' to use this feature.
+	 * This flag is ignored by the FTS product variant; it is assumed to be always set
+	 * (as is lockGnssFreq). Set maxSlewRate and maxPhaseCorrRate fields of CFG-SMGR to
+	 * 0 to disable alignment.
+	 */
+	bool alignToTow;
+
+	/*
+	 * Pulse polarity:
+	 * 0: falling edge at top of second
+	 * 1: rising edge at top of second
+	 */
+	bool polarity;
+
+	/*
+	 * Timegrid to use:
+	 * 0: UTC
+	 * 1: GPS
+	 * 2: GLONASS
+	 * 3: BeiDou
+	 * 4: Galileo (not supported in protocol versions less than 18)
+	 * This flag is only relevant if 'lockGnssFreq' and 'alignToTow' are set.
+	 * Note that configured GNSS time is estimated by the receiver if locked to
+	 * any GNSS system. If the receiver has a valid GNSS fix it will attempt to
+	 * steer the TP to the specified time grid even if the specified time is not
+	 * based on information from the constellation's satellites. To ensure timing
+	 * based purely on a given GNSS, restrict the supported constellations in CFG-GNSS.
+	 */
+	uint8_t gridUtcGnss;
+
+	/*
+	 * Sync Manager lock mode to use:
+	 *
+	 * 0: switch to 'freqPeriodLock' and 'pulseLenRatioLock' as soon as Sync
+	 * Manager has an accurate time, never switch back to 'freqPeriod' and 'pulseLenRatio'
+	 *
+	 * 1: switch to 'freqPeriodLock' and 'pulseLenRatioLock' as soon as Sync Manager has
+	 * an accurate time, and switch back to 'freqPeriod' and 'pulseLenRatio' as soon as
+	 * time gets inaccurate.
+	 *
+	 * This field is only relevant for the FTS product variant.
+	 * This field is only relevant if the flag 'lockedOtherSet' is set.
+	 */
+	uint8_t syncMode;
+} ubx_cfg_tp5;
+
 // ============== RTCM Datatypes ================== //
 
 typedef struct {
@@ -668,6 +781,14 @@ typedef enum {
 	DRV8301_OC_REPORT_ONLY,
 	DRV8301_OC_DISABLED
 } drv8301_oc_mode;
+
+typedef enum {
+	MOTOR_CONTROL_DUTY = 0,
+	MOTOR_CONTROL_CURRENT,
+	MOTOR_CONTROL_CURRENT_BRAKE,
+	MOTOR_CONTROL_RPM,
+	MOTOR_CONTROL_POS
+} motor_control_mode;
 
 typedef struct {
 	// Switching and drive
